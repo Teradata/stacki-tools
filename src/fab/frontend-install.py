@@ -49,21 +49,41 @@ def generate_multicast():
 	d = random.randrange(1,255)
 	return str(a)+'.'+str(b)+'.'+str(c)+'.'+str(d)
 
-def repoconfig(mountdir):
+def repoconfig(stacki_iso, extra_iso):
+	if extra_iso:
+		#
+		# we are going to use the ISO(s) described in the 'extra_iso'
+		# list, so let's move the CentOS repo files out of the way.
+		#
+		subprocess.call(['mkdir', '-p', '/etc/yum.repos.d/save'])
+		subprocess.call(['mv', '/etc/yum.repos.d/*.repo',
+			'/etc/yum.repos.d/save/'])
 
-	for (r, d, f) in os.walk(mountdir):
-		for name in f:
-			if name == 'roll-stacki.xml':
+	file = open('/etc/yum.repos.d/stack.repo', 'w')
+
+	for iso in [ stacki_iso ] + extra_iso:
+		if iso[0] == '/':
+			mountdir = os.path.join('/run', iso[1:])
+		else:
+			mountdir = os.path.join('/run', iso)
+				
+		mount(iso, mountdir)
+
+		repodir = None
+		for (r, d, f) in os.walk(mountdir):
+			if 'repodata' in d:
 				repodir = r
 				break
 
-	file = open('/etc/yum.repos.d/stack.repo', 'w')
-	file.write('[stacki]\n')
-	file.write('name=stacki\n')
-	file.write('baseurl=file://%s\n'
-		% (repodir))
-	file.write('assumeyes=1\n')
-	file.write('gpgcheck=no\n')
+		if not repodir:
+			continue
+
+		file.write('[%s]\n' % os.path.basename(iso))
+		file.write('name=%s\n' % os.path.basename(iso))
+		file.write('baseurl=file://%s\n' % (repodir))
+		file.write('assumeyes=1\n')
+		file.write('gpgcheck=no\n\n')
+
 	file.close()
 
 	
@@ -137,11 +157,8 @@ subprocess.call(['service', 'NetworkManager', 'stop'])
 
 stacki_iso = os.path.abspath(stacki_iso)
 
-mountdir = tempfile.mkdtemp()
-mount(stacki_iso, mountdir)
-
 # create repo config file
-repoconfig(mountdir)
+repoconfig(stacki_iso, extra_iso)
 
 pkgs = [ 'stack-command', 'foundation-python', 'stack-pylib',
 	'foundation-python-xml', 'foundation-redhat', 
