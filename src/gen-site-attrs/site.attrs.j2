@@ -1,0 +1,61 @@
+HttpConf:/etc/httpd/conf
+HttpConfigDirExt:/etc/httpd/conf.d
+HttpRoot:/var/www/html
+Info_CertificateCountry:US
+Info_CertificateLocality:Solana Beach
+Info_CertificateOrganization:StackIQ
+Info_CertificateState:California
+Info_ClusterContact:
+Info_ClusterLatlong:N32.87 W117.22
+Info_ClusterName:
+Info_ClusterURL:http://{{ HOSTNAME }}.{{ DOMAIN }}/
+Info_FQDN:{{ HOSTNAME }}.{{ DOMAIN }}
+Kickstart_BoxDir:/export/stack
+Kickstart_DistroDir:/export/stack
+Kickstart_Keyboard:us
+Kickstart_Lang:en_US
+Kickstart_Langsupport:en_US
+Kickstart_PrivateAddress:{{ BACKEND_NETWORK_ADDRESS }}
+Kickstart_PrivateBroadcast:{{ BACKEND_BROADCAST_ADDRESS }}
+Kickstart_PrivateDNSDomain:{{ DOMAIN }}
+Kickstart_PrivateDNSServers:{{ DNS_SERVERS }}
+Kickstart_PrivateDjangoRootPassword:{{ DJANGO_PASSWORD }}
+Kickstart_PrivateEthernet:{{ BACKEND_MAC_ADDRESS }}
+Kickstart_PrivateGateway:{{ GATEWAY }}
+Kickstart_PrivateHostname:{{ HOSTNAME }}
+Kickstart_PrivateInterface:{{ BACKEND_NETWORK_INTERFACE }}
+Kickstart_PrivateKickstartBasedir:distributions
+Kickstart_PrivateKickstartCGI:sbin/kickstart.cgi
+Kickstart_PrivateKickstartHost:{{ BACKEND_NETWORK_ADDRESS }}
+Kickstart_PrivateMD5RootPassword:{{ MD5_PASSWORD }}
+Kickstart_PrivateNTPHost:{{ BACKEND_NETWORK_ADDRESS }}
+Kickstart_PrivateNetmask:{{ BACKEND_NETMASK }}
+Kickstart_PrivateNetmaskCIDR:{{ BACKEND_NETMASK_CIDR }}
+Kickstart_PrivateNetwork:{{ BACKEND_NETWORK }}
+Kickstart_PrivatePortableRootPassword:{{ PORTABLE_PASSWORD }}
+Kickstart_PrivateRootPassword:{{ SHADOW_PASSWORD }}
+Kickstart_PrivateSHARootPassword:{{ MYSQL_PASSWORD }}
+Kickstart_PrivateSyslogHost:
+Kickstart_PublicAddress:
+Kickstart_PublicBroadcast:
+Kickstart_PublicDNSDomain:
+Kickstart_PublicDNSServers:
+Kickstart_PublicEthernet:
+Kickstart_PublicGateway:
+Kickstart_PublicHostname:
+Kickstart_PublicInterface:
+Kickstart_PublicKickstartHost:
+Kickstart_PublicNTPHost:pool.ntp.org
+Kickstart_PublicNetmask:
+Kickstart_PublicNetmaskCIDR:
+Kickstart_PublicNetwork:
+Kickstart_Timezone:{{ TIMEZONE }}
+RootDir:/root
+nukedisks:False
+Kickstart_PrivateKickstartBasedir:distributions
+Kickstart_Multicast:233.224.130.2
+Private_PureRootPassword:a
+Confirm_Private_PureRootPassword:a
+Server_Partitioning:force-default-root-disk-only
+disableServices:
+serviceList:
