@@ -122,11 +122,7 @@ class Attr():
 				'GATEWAY': self.attrs['gateway'],
 				'DNS_SERVERS': self.attrs['dns_servers'],
 				'TIMEZONE': self.attrs['timezone'],
-				'DJANGO_PASSWORD': self.attrs['django_pass'],
-				'MD5_PASSWORD': self.attrs['md5_pass'],
-				'PORTABLE_PASSWORD': self.attrs['portable_pass'],
 				'SHADOW_PASSWORD': self.attrs['shadow_pass'],
-				'MYSQL_PASSWORD': self.attrs['mysql_pass'],
 			})
 		with open(filename, 'wb') as outfile:
 			outfile.write(rendered_attrs_file + '\n')
@@ -203,38 +199,17 @@ class Attr():
 		self.attrs['dns_servers'] = ','.join(valid_dns_servers)
 
 	def set_password(self):
-		''' encrypt the password in a variety of formats as needed by various applications '''
+		''' encrypt the password in the 'crypt' format '''
 
 		password = self.settings['password']
 		if not password:
 			raise ValueError('Error: password must not be empty')
-
-		# PrivateSHARootPassword
-		hashed_pass = hashlib.sha1(password)
-		hashed_hash = hashlib.sha1(hashed_pass.digest())
-		self.attrs['mysql_pass'] = hashed_hash.hexdigest()
 
 		# PrivateRootPassword
 		# can't rely on MacOSX underlying C crypt() code
 		openssl_cmd = 'openssl passwd -1 -salt %s %s' % (gen_salt(), password)
 		encrypted_pass = subprocess.check_output(openssl_cmd.split()).strip()
 		self.attrs['shadow_pass'] = encrypted_pass
-
-		# PrivateMD5RootPassword
-		md5_pass = hashlib.md5(password).hexdigest()
-		self.attrs['md5_pass'] = md5_pass
-
-		# PrivateDjangoRootPassword:
-		salt = gen_salt()
-		hash = hashlib.sha1(salt)
-		hash.update(password)
-		django_pass = 'sha1$%s$%s' % (salt, hash.hexdigest())
-		self.attrs['django_pass'] = django_pass
-
-		# PrivatePortablePassword:
-		openssl_cmd = 'openssl passwd -1 -salt %s %s' % (gen_salt(), password)
-		portable_pass = subprocess.check_output(openssl_cmd.split()).strip()
-		self.attrs['portable_pass'] = portable_pass
 
 
 def gen_salt():
