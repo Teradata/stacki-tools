@@ -78,11 +78,7 @@ class Attr():
 		'timezone',
 		'password',
 		'mac_address',
-		'django_pass',
-		'md5_pass',
-		'portable_pass',
 		'shadow_pass',
-		'mysql_pass',
 		]
 
 	def __init__(self, settings):
