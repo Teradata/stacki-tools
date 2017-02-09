@@ -11,6 +11,7 @@ Options:
   --debug                           Print various data structures during runtime
   --template=<template filename>    Location of site.attrs.j2
   --output_filename=<filename>      Location to save site.attrs
+  --stdout                          Instead of saving the file, print it to stdout
   --fqdn=<fqdn>                     FQDN of the frontend
   --timezone=<timezone>             Timezone string
   --network=<network address>       Network for Stacki traffic
@@ -99,14 +100,15 @@ class Attr():
 				self.set_address(addr, value)
 			self.set_dns()
 			self.set_password()
+			self.render_attrs_file(settings['template'])
 		except ValueError as e:
 			raise
 
-	def render_attrs_file(self, template_file, filename):
-		''' Render the stored attributes as a 'site.attrs' file as `filename`, using template `template_file` '''
+	def render_attrs_file(self, template_file):
+		''' Render the stored attributes as a 'site.attrs', using template `template_file` '''
 
-		if os.path.isdir(filename):
-			filename = filename + '/' + os.path.basename(defaults['output_filename'])
+		if not os.path.isfile(template_file):
+			template_file = './site.attrs.j2'
 
 		with open(template_file) as template:
 			rendered_attrs_file = jinja2.Template(template.read()).render({
@@ -124,8 +126,8 @@ class Attr():
 				'TIMEZONE': self.attrs['timezone'],
 				'SHADOW_PASSWORD': self.attrs['shadow_pass'],
 			})
-		with open(filename, 'wb') as outfile:
-			outfile.write(rendered_attrs_file + '\n')
+
+		self.output = rendered_attrs_file + '\n'
 
 	def set_timezone(self):
 		''' try to fit the timezone to a list of actual timezones '''
@@ -292,6 +294,14 @@ if __name__ == '__main__':
 	print_debug('compiled attributes', attrs.attrs)
 
 	# and finally, render the file and save to disk
-	attrs.render_attrs_file(template_file = settings['template'], filename=settings['output_filename'])
+	if cleaned_args.has_key('stdout'):
+		print(attrs.output)
+	else:
+		filename = settings['output_filename']
+		if os.path.isdir(filename):
+			filename = filename + '/' + os.path.basename(defaults['output_filename'])
+
+		with open(filename, 'wb') as outfile:
+			outfile.write(attrs.output)
 	sys.exit(0)
 
