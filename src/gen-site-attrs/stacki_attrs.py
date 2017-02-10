@@ -22,6 +22,7 @@ Options:
   --interface=<interface name>      Device used for Stacki traffic
   --mac_address=<mac address>       MAC address of the interface
   --password=<root password>        Password to set for administration
+  --pass_encrypted                  Indicate that the password provided is already encrypted
   --dns_servers=<server1[,server2]> DNS servers for frontend
 
 '''
@@ -205,8 +206,11 @@ class Attr():
 
 		# PrivateRootPassword
 		# can't rely on MacOSX underlying C crypt() code
-		openssl_cmd = 'openssl passwd -1 -salt %s %s' % (gen_salt(), password)
-		encrypted_pass = subprocess.check_output(openssl_cmd.split()).strip()
+		if not self.settings['pass_encrypted']:
+			openssl_cmd = 'openssl passwd -1 -salt %s %s' % (gen_salt(), password)
+			encrypted_pass = subprocess.check_output(openssl_cmd.split()).strip()
+		else:
+			encrypted_pass = password
 		self.attrs['shadow_pass'] = encrypted_pass
 
 
