@@ -15,8 +15,6 @@ Kickstart_PrivateEthernet:{{ BACKEND_MAC_ADDRESS }}
 Kickstart_PrivateGateway:{{ GATEWAY }}
 Kickstart_PrivateHostname:{{ HOSTNAME }}
 Kickstart_PrivateInterface:{{ BACKEND_NETWORK_INTERFACE }}
-Kickstart_PrivateKickstartBasedir:distributions
-Kickstart_PrivateKickstartCGI:sbin/kickstart.cgi
 Kickstart_PrivateKickstartHost:{{ BACKEND_NETWORK_ADDRESS }}
 Kickstart_PrivateNTPHost:{{ BACKEND_NETWORK_ADDRESS }}
 Kickstart_PrivateNetmask:{{ BACKEND_NETMASK }}
@@ -25,5 +23,4 @@ Kickstart_PrivateNetwork:{{ BACKEND_NETWORK }}
 Kickstart_PrivateRootPassword:{{ SHADOW_PASSWORD }}
 Kickstart_PublicNTPHost:pool.ntp.org
 Kickstart_Timezone:{{ TIMEZONE }}
-RootDir:/root
 nukedisks:False
