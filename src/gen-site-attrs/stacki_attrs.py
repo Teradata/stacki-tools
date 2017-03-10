@@ -17,6 +17,7 @@ Options:
   --network=<network address>       Network for Stacki traffic
   --ip=<ip_address>                 IP address of frontend
   --netmask=<subnet mask>           Netmask of frontend
+  --cidr=<bits in netmask>          The CIDR represenation of the netmask
   --gateway=<gateway address>       Gateway of frontend
   --broadcast=<broadcast address>   Broadcast of frontend
   --interface=<interface name>      Device used for Stacki traffic
@@ -40,7 +41,7 @@ import hashlib
 import subprocess
 from pprint import pprint
 from stacklib import docopt
-from stacklib import ip
+from stacklib import ipaddress
 # also requires the openssl binary installed!
 
 default_ipv4 = {
@@ -49,6 +50,7 @@ default_ipv4 = {
 	'broadcast': '',
 	'gateway': '',
 	'network': '',
+	'cidr': '',
 	}
 
 defaults = {
@@ -57,6 +59,7 @@ defaults = {
 	'dns_servers': '8.8.8.8',
 	'timezone': 'America/Los_Angeles',
 	'password': 'password',
+	'pass_encrypted': False,
 	'mac_address': '08:00:d0:0d:c1:89',
 	'template': '/opt/stack/gen-site-attrs/site.attrs.j2',
 	'output_filename': './site.attrs',
@@ -73,6 +76,7 @@ class Attr():
 		'network',
 		'ip',
 		'netmask',
+		'cidr',
 		'broadcast',
 		'gateway',
 		'dns_servers',
@@ -115,7 +119,7 @@ class Attr():
 				'BACKEND_NETWORK': self.attrs['network'],
 				'BACKEND_NETWORK_ADDRESS': self.attrs['ip'],
 				'BACKEND_NETMASK': self.attrs['netmask'],
-				'BACKEND_NETMASK_CIDR': ip.netmask_to_cidr(self.attrs['netmask']),
+				'BACKEND_NETMASK_CIDR': self.attrs['cidr'],
 				'BACKEND_BROADCAST_ADDRESS': self.attrs['broadcast'],
 				'BACKEND_MAC_ADDRESS': self.attrs['mac_address'],
 				'GATEWAY': self.attrs['gateway'],
@@ -171,6 +175,10 @@ class Attr():
 
 	def set_address(self, key, address):
 		''' check that the address is a valid addressable ipv4 address '''
+
+		if key == 'cidr':
+			self.attrs[key] = address
+			return
 
 		if len(address.split('.')) != 4:
 			raise ValueError('Error: addresses must be specified in dotted-quad format: "%s"' % address)
@@ -256,27 +264,44 @@ if __name__ == '__main__':
 
 	ip_addr = user_ipv4_settings['ip']
 	mask = user_ipv4_settings['netmask']
-	if not mask and ip_addr and '/' in ip_addr:
-		settings['ip'], settings['netmask'] = ip_addr.split('/')
+	cidr = user_ipv4_settings['cidr']
+	if not cidr and not mask and ip_addr and '/' in ip_addr:
+		settings['ip'], mask = ip_addr.split('/')
+		if len(mask) > 2 and '.' in mask:
+			settings['netmask'] = mask
+		else:
+			settings['cidr'] = mask
 	elif ip_addr and mask:
 		# if they pass both, that's fine
+		pass
+	elif ip_addr and cidr:
 		pass
 	elif not ip_addr and not mask:
 		# if they pass neither, they get the defaults
 		pass
 	else:
 		# but if they pass one but not the other...
-		print('Error: if specifying one, you must specify both ip and netmask')
+		print('Error: if specifying one, you must specify both ip as well as netmask or cidr')
 		sys.exit(1)
 
-	ip_addr = ip.ipaddress(settings['ip'], settings['netmask'])
-	settings['ip']              = ip_addr.address
-	settings['netmask']         = ip_addr.subnet_mask
+	if mask:
+		ipstring = unicode(settings['ip'] + '/' + mask)
+	elif cidr:
+		ipstring = unicode(settings['ip'] + '/' + cidr)
+
+	ip_addr = ipaddress.IPv4Network(ipstring, strict=False)
+
+	settings['netmask']         = str(ip_addr.with_netmask).split('/')[1]
+	settings['cidr']            = str(ip_addr.prefixlen)
 
 	# calulate these only if the user didn't specify
-	for key in ['gateway', 'broadcast', 'network']:
-		if not user_ipv4_settings[key]:
-			settings[key] = getattr(ip_addr, key)
+	if not user_ipv4_settings['network']:
+		settings['network']         = str(ip_addr.network_address)
+	# assume the gateway is the first host IP in the network
+	if not user_ipv4_settings['gateway']:
+		settings['gateway']         = str(ip_addr[1])
+	if not user_ipv4_settings['broadcast']:
+		settings['broadcast']       = str(ip_addr.broadcast_address)
 
 	# for 'list', pretty print the defaults overlayed with user args
 	if cleaned_args.has_key('list'):
