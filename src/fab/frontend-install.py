@@ -131,7 +131,7 @@ for iso in extra_iso:
 		print("Error: File '{0}' does not exist.".format(iso))
 		sys.exit(1)
 
-banner("Boostrap Stack Command Line")
+banner("Bootstrap Stack Command Line")
 
 # turn off NetworkManager so it doesn't overwrite our networking info
 subprocess.call(['service', 'NetworkManager', 'stop'])
