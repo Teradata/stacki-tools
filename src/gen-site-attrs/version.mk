@@ -1,3 +1,3 @@
 NAME=stacki-gen-site-attrs
-VERSION=3.x
+VERSION=4.x
 RELEASE=all

@@ -1,3 +1,3 @@
 NAME=stacki-fab
-VERSION=3.x
+VERSION=4.x
 RELEASE=all
