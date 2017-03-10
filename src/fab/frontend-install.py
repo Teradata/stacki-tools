@@ -174,13 +174,10 @@ if not os.path.exists('/tmp/site.attrs') and not \
 	
 	# add missing attrs to site.attrs
 	f = open("/tmp/site.attrs", "a")
-	string= "Kickstart_PrivateKickstartBasedir:distributions\n"
 	string+= "Kickstart_Multicast:"+generate_multicast()+"\n"
 	string+= "Private_PureRootPassword:a\n"
 	string+= "Confirm_Private_PureRootPassword:a\n"
 	string+= "Server_Partitioning:force-default-root-disk-only\n"
-	string+= "disableServices:\n"
-	string+= "serviceList:\n"
 	f.write(string)
 	f.close()
 
