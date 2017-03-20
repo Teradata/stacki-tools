@@ -147,7 +147,7 @@ repoconfig(mountdir)
 pkgs = [ 'stack-command', 'foundation-python', 'stack-pylib',
 	'foundation-python-xml', 'foundation-redhat', 
 	'foundation-py-wxPython','foundation-py-pygtk',
-	'stack-wizard', 'net-tools']
+	'foundation-py-ipaddress', 'stack-wizard', 'net-tools']
 
 return_code = installrpms(pkgs)
 if return_code != 0:
