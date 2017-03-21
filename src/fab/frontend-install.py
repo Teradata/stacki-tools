@@ -9,15 +9,14 @@
 from __future__ import print_function
 import os
 import sys
-import string
 import subprocess
 import random
 import getopt
 import tempfile
 
-def banner(string):
+def banner(str):
 	print('#######################################')
-	print(string)
+	print(str)
 	print('#######################################')	
 
 def copy(source, dest):
@@ -174,11 +173,11 @@ if not os.path.exists('/tmp/site.attrs') and not \
 	
 	# add missing attrs to site.attrs
 	f = open("/tmp/site.attrs", "a")
-	string+= "Kickstart_Multicast:"+generate_multicast()+"\n"
-	string+= "Private_PureRootPassword:a\n"
-	string+= "Confirm_Private_PureRootPassword:a\n"
-	string+= "Server_Partitioning:force-default-root-disk-only\n"
-	f.write(string)
+	str= "Kickstart_Multicast:"+generate_multicast()+"\n"
+	str+= "Private_PureRootPassword:a\n"
+	str+= "Confirm_Private_PureRootPassword:a\n"
+	str+= "Server_Partitioning:force-default-root-disk-only\n"
+	f.write(str)
 	f.close()
 
 # convert site.attrs to python dict
