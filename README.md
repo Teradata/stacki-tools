@@ -20,6 +20,12 @@ This program takes user input and creates `/tmp/site.attrs` that can be used wit
 Packer to automate the installation of a Vagrant/VirtualBox based frontend.
 See below for details.
 
+- `stacki-tools/src/bob`
+
+Used to create the `stacki-bob` RPM which contains a set of scripts capable of
+producing automated builds of Stacki pallets, including Stacki itself.
+See the `bob` sub-folder's README for details.
+
 ---
 
 # `stacki-tools/src/fab`

@@ -1,0 +1,244 @@
+---
+# BOB - Bot-Operated Builds
+
+# Call this playbook with -e "ini_file=/path/to/vars_file.ini"
+
+- hosts: all
+  remote_user: root
+  vars:
+    ini_file: ''
+    pallet_name: "{{ lookup('ini', 'pallet_name section=build file=' + ini_file) }}"
+    repo_dir: "{{ lookup('ini', 'repo_base_dir section=build file=' + ini_file + ' default=' + pallet_name) }}"
+    branch: "{{ lookup('ini', 'branch section=build file=' + ini_file + ' default=master') }}"
+    # TODO find a better way to infer this
+    centos_version: '7.3'
+
+
+  tasks:
+  - name: make build dirs
+    file:
+      path: /export/{{ item }}
+      state: directory
+      mode: 0755
+    with_items:
+      - 'nightly'
+      - 'build'
+      - 'src'
+
+  - name: find stacki-pro pallets
+    local_action: shell ls -t /export/nightly/stacki-pro/stacki-pro-*.iso
+    register: latest_stacki_pro_isos
+
+  - name: find latest stacki-pro pallet filename
+    set_fact: stacki_pro_iso={{ latest_stacki_pro_isos.stdout_lines | first }}
+
+  - name: find stacki-ux pallets
+    local_action: shell ls -t /export/nightly/stacki-ux/stacki-ux-*.iso
+    register: latest_stacki_ux_isos
+
+  - name: find latest stacki-ux pallet filename
+    set_fact: stacki_ux_iso={{ latest_stacki_ux_isos.stdout_lines | first }}
+
+  - name: find uefi pallets
+    local_action: shell ls -t /export/nightly/uefi/uefi-*.iso
+    register: latest_uefi_isos
+
+  - name: find latest uefi pallet filename
+    set_fact: uefi_iso={{ latest_uefi_isos.stdout_lines | first }}
+
+  - name: find latest CentOS iso
+    local_action: shell ls -t /export/nightly/centos/CentOS-7-*.iso
+    register: latest_centos_isos
+
+  - name: find latest centos pallet filename
+    set_fact: centos_iso={{ latest_centos_isos.stdout_lines | first }}
+
+  - name: find latest CentOS-Updates iso
+    local_action: shell ls -t /export/nightly/centos-updates/CentOS-Updates-*.iso
+    register: latest_centos_updates_isos
+
+  - name: find latest centos-updates pallet filename
+    set_fact: centos_updates_iso={{ latest_centos_updates_isos.stdout_lines | first }}
+
+  - name: copy input isos
+    copy:
+      src: "{{ item }}"
+      dest: /export/src/
+      mode: 0755
+    with_items:
+      - "{{ stacki_pro_iso }}"
+      - "{{ stacki_ux_iso }}"
+      - "{{ uefi_iso }}"
+      - "{{ centos_iso }}"
+      - "{{ centos_updates_iso }}"
+
+  - name: remove pallets if they exist
+    command: stack remove pallet {{ item }}
+    with_items:
+      - stacki-pro
+      - stacki-ux
+      - uefi
+      - CentOS
+      - CentOS-Updates
+    ignore_errors: true
+
+  - name: add pallets
+    command: stack add pallet /export/src/{{ item | basename }}
+    with_items:
+      - "{{ stacki_pro_iso }}"
+      - "{{ stacki_ux_iso }}"
+      - "{{ uefi_iso }}"
+      - "{{ centos_iso }}"
+      - "{{ centos_updates_iso }}"
+
+  - name: enable pallets
+    command: stack enable pallet {{ item }}
+    with_items:
+      - stacki-pro
+      - stacki-ux
+      - uefi
+      - CentOS
+      - CentOS-Updates
+
+  - name: get version string from CentOS
+    command: stack list pallet CentOS output-header=no output-col=version
+    register: centos_major_version_output
+
+  - name: set centos and os version
+    set_fact: centos_major_version={{ centos_major_version_output.stdout | trim }}
+
+  - name: get version string from Updates
+    command: stack list pallet CentOS-Updates output-header=no output-col=version
+    register: pallet_version_output
+
+  - name: set updates version
+    set_fact: updates_version={{ pallet_version_output.stdout }}
+
+  - name: archive source
+    local_action: command chdir=/export/build/ tar -cvzf /export/src/{{ repo_dir }}.tar.gz {{ repo_dir }}
+
+  - name: copy pallet source
+    unarchive:
+      dest: /export/build/
+      src: /export/src/{{ repo_dir }}.tar.gz
+
+  - name: get commit hash
+    command: chdir=/export/build/{{ repo_dir }} git rev-parse --short HEAD
+    register: commit_hash_output
+
+  - name: modify updates version in version.mk
+    lineinfile:
+      create: yes
+      state: present
+      path: /export/build/{{ repo_dir }}/7.x.mk
+      regexp: 'UPDATES_VERSION	= .*'
+      line: 'UPDATES_VERSION	= {{ updates_version }}'
+
+  - name: modify os version in version.mk
+    lineinfile:
+      create: yes
+      state: present
+      path: /export/build/{{ repo_dir }}/7.x.mk
+      regexp: '^OSVERSION\s*= .*'
+      line: 'OSVERSION	= {{ centos_major_version }}'
+
+  - name: modify centos version in version.mk
+    lineinfile:
+      create: yes
+      state: present
+      path: /export/build/{{ repo_dir }}/7.x.mk
+      regexp: 'CENTOS_VERSION	= .*'
+      line: 'CENTOS_VERSION	= {{ centos_version }}'
+
+  - name: modify os version in version.mk
+    lineinfile:
+      create: yes
+      state: present
+      path: /export/build/{{ repo_dir }}/7.x.mk
+      regexp: '^VERSION		= .*'
+      line: 'VERSION		= {{ centos_version + "_" + commit_hash_output.stdout }}'
+
+  - name: copy build script
+    copy:
+      src: /opt/stack/bin/pallet_builder.py
+      dest: /export/src/
+      mode: 0755
+
+  - name: copy build vars
+    copy:
+      src: "{{ ini_file }}"
+      dest: /export/src/
+
+  - name: run pallet_builder
+    command: /export/src/pallet_builder.py /export/src/{{ ini_file | basename }}
+#    ignore_errors: yes
+    register: build_status
+
+  - name: find remote detailed build log
+    shell: ls /export/nightly/{{ pallet_name }}/nightly*build.txt
+    register: file_path
+
+  - name: get build log
+    fetch:
+      src: "{{ file_path.stdout }}"
+      dest: /export/nightly/{{ pallet_name }}/
+      flat: yes
+      fail_on_missing: yes
+
+  - name: find remote iso
+    shell: ls -t /export/nightly/{{ pallet_name }}/{{ pallet_name }}*iso
+    register: file_path
+    when: build_status|succeeded
+
+  - name: get iso
+    fetch:
+      src: "{{ file_path.stdout_lines | first }}"
+      dest: /export/nightly/{{ pallet_name }}/
+      flat: yes
+      fail_on_missing: yes
+    when: build_status|succeeded
+
+  - name: remove input isos
+    file:
+      name: /export/src/{{ item }}
+      state: absent
+    with_items:
+      - "{{ stacki_pro_iso | basename }}"
+      - "{{ stacki_ux_iso | basename }}"
+      - "{{ uefi_iso | basename }}"
+      - "{{ centos_iso | basename }}"
+      - "{{ centos_updates_iso | basename }}"
+
+  - name: remove pallets
+    command: stack remove pallet {{ item }}
+    with_items:
+      - stacki-pro
+      - stacki-ux
+      - uefi
+      - CentOS
+      - CentOS-Updates
+    ignore_errors: true
+
+  - name: delete tarball
+    file:
+      name: /export/src/{{ repo_dir }}.tar.gz
+      state: absent
+
+  - name: delete artifact isos
+    file:
+      name: "{{ file_path.stdout }}"
+      state: absent
+
+  - name: delete source tree
+    file:
+      name: /export/{{ item }}/
+      state: absent
+    with_items:
+      - 'nightly'
+      - 'build'
+      - 'src'
+
+  - name: Job's done!
+    debug:
+      msg: Done with build job for {{ pallet_name }}
+

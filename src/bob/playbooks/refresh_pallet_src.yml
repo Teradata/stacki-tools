@@ -1,0 +1,83 @@
+---
+# BOB - Bot-Operated Builds
+
+# Call this playbook with -e "ini_file=/path/to/vars_file.ini"
+
+- hosts: all
+  remote_user: root
+  vars:
+    ini_file: ''
+    pallet_name: "{{ lookup('ini', 'pallet_name section=build file=' + ini_file) }}"
+    repo_dir: "{{ lookup('ini', 'repo_base_dir section=build file=' + ini_file + ' default=' + pallet_name) }}"
+    branch: "{{ lookup('ini', 'branch section=build file=' + ini_file + ' default=master') }}"
+    git_user: "{{ lookup('ini', 'git_user section=build file=' + ini_file) }}"
+    git_password: "{{ lookup('ini', 'git_passwd section=build file=' + ini_file) }}"
+    git_url: "{{ lookup('ini', 'repo_url section=build file=' + ini_file) }}"
+    skip_refresh: "{{ lookup('ini', 'skip_refresh section=build file=' + ini_file) }}"
+
+  tasks:
+  - name: Starting job
+    debug:
+      msg: starting job for {{ pallet_name }}
+
+  - name: is 'skip_refresh' in {{ ini_file }}
+    debug:
+      msg: skipping refresh of {{ pallet_name }}
+    when: skip_refresh == true
+
+  - meta: end_play
+    when: skip_refresh == true
+
+  - name: make build dirs
+    file:
+      path: /export/{{ item }}
+      state: directory
+      mode: 0755
+    with_items:
+      - 'nightly'
+      - 'build'
+      - 'src'
+
+  - name: check if git_password points to a file
+    command: cat {{ git_url }}
+    ignore_errors: true
+    register: cat_result
+
+  - name: if git_password is a file, set its contents
+    set_fact: git_password={{ cat_result.stdout }}
+    when: cat_result|succeeded
+
+  - name: check if repo directory exists
+    stat:
+      path: /export/build/{{ repo_dir }}
+    register: check_path
+
+  - name: git clone if repo doesn't exist
+    command: git clone https://{{ git_user }}:{{ git_pass }}@{{ git_url }}
+    args:
+      chdir: /export/build/
+    when: check_path.stat.exists == false
+
+  - name: git clean
+    command: git clean -xfd
+    args:
+      chdir: /export/build/{{ repo_dir }}
+
+  - name: git reset
+    command: git reset --hard HEAD
+    args:
+      chdir: /export/build/{{ repo_dir }}
+
+  - name: git pull
+    command: git pull
+    args:
+      chdir: /export/build/{{ repo_dir }}
+
+  - name: archive pallet source
+    command: tar -cvzf /export/src/{{ repo_dir }}.tar.gz {{ repo_dir }}
+    args:
+      chdir: /export/build/
+
+  - name: Job's done!
+    debug:
+      msg: Job's done for {{ pallet_name }}

@@ -1,0 +1,139 @@
+---
+# BOB - Bot-Operated Builds
+
+# Call this playbook with -e "ini_file=/path/to/vars_file.ini"
+
+- hosts: all
+  remote_user: root
+  vars:
+    ini_file: ''
+    pallet_name: "{{ lookup('ini', 'pallet_name section=build file=' + ini_file) }}"
+    repo_dir: "{{ lookup('ini', 'repo_base_dir section=build file=' + ini_file + ' default=' + pallet_name) }}"
+    branch: "{{ lookup('ini', 'branch section=build file=' + ini_file + ' default=master') }}"
+
+  tasks:
+  - name: print vars
+    debug:
+      msg: "{{ repo_dir }}"
+
+  - name: find latest pallet iso
+    local_action: shell ls -t /export/nightly/{{ pallet_name }}/{{ pallet_name }}*.iso
+    register: pallet_isos
+    ignore_errors: yes
+
+  - name: set empty iso filename
+    set_fact: latest_iso='""'
+    when: pallet_isos|failed
+
+  - name: find latest pallet filename
+    set_fact: latest_iso={{ pallet_isos.stdout_lines | first }}
+    when: pallet_isos|succeeded
+
+  - name: set regex pattern for ISO
+    set_fact: iso_pattern="{{ pallet_name }}-(?P<version>\d+\.\d+)_?(?P<date>\w+)?_(?P<commit>\w+)?-.*\.iso"
+
+  - name: extract commit hash from iso
+    set_fact: pallet_commit={{ latest_iso | basename | regex_replace(iso_pattern, '\\g<commit>') }}
+
+  - name: refresh pallet source
+    local_action: command chdir=/export/build/{{ repo_dir }} git pull
+
+  - name: change branch
+    local_action: command chdir=/export/build/{{ repo_dir }} git checkout {{ branch }}
+
+  - name: get repo commit hash
+    local_action: command chdir=/export/build/{{ repo_dir }} git rev-parse --short HEAD
+    register: repo_commit
+
+  - name: checking if build is required
+    debug:
+      msg: checking if latest iso commit {{ pallet_commit }} == {{ repo_commit.stdout }}
+
+  - meta: end_play
+    when: repo_commit.stdout == pallet_commit
+
+  - name: delete remote source tree if exists
+    file:
+      name: /export/{{ item }}/
+      state: absent
+    with_items:
+      - 'nightly'
+      - 'build'
+      - 'src'
+
+  - name: make build dirs
+    file:
+      path: /export/{{ item }}
+      state: directory
+      mode: 0755
+    with_items:
+      - 'nightly'
+      - 'build'
+      - 'src'
+
+  - name: archive source
+    local_action: command chdir=/export/build/ tar -cvzf /export/src/{{ repo_dir }}.tar.gz {{ repo_dir }} 
+
+  - name: copy pallet source
+    unarchive:
+      dest: /export/build/
+      src: /export/src/{{ repo_dir }}.tar.gz
+
+  - name: copy build script
+    copy:
+      src: /opt/stack/bin/pallet_builder.py
+      dest: /export/src/
+      mode: 0755
+
+  - name: copy github cred
+    copy:
+      src: /root/github_access_token
+      dest: /root/
+
+  - name: copy build vars
+    copy:
+      src: "{{ ini_file }}"
+      dest: /export/src/
+
+  - name: run pallet_builder
+    command: /export/src/pallet_builder.py /export/src/{{ ini_file | basename }}
+    ignore_errors: yes
+    register: build_status
+
+  - name: find remote detailed build log
+    shell: ls /export/nightly/{{ pallet_name }}/nightly*build.txt
+    register: file_path
+
+  - name: get build log
+    fetch:
+      src: "{{ file_path.stdout }}"
+      dest: /export/nightly/{{ pallet_name }}/
+      flat: yes
+      fail_on_missing: yes
+
+  - name: find remote iso
+    shell: ls -t /export/nightly/{{ pallet_name }}/{{ pallet_name }}*iso
+    register: file_path
+    when: build_status|succeeded
+
+  - name: get iso
+    fetch:
+      src: "{{ file_path.stdout_lines | first }}"
+      dest: /export/nightly/{{ pallet_name }}/
+      flat: yes
+      fail_on_missing: yes
+    when: build_status|succeeded
+
+  - name: delete github cred
+    file:
+      name: /root/stacki_github_access_token.txt
+      state: absent
+
+  - name: delete tarball
+    file:
+      name: /export/src/{{ repo_dir }}.tar.gz
+      state: absent
+
+  - name: Job's done!
+    debug:
+      msg: Done with build job for {{ pallet_name }}

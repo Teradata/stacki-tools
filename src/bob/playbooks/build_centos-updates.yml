@@ -1,0 +1,85 @@
+---
+# BOB - Bot-Operated Builds
+
+- hosts: all
+  remote_user: root
+  vars:
+    - pallet_name: CentOS-Updates
+    - repo_dir: "{{ pallet_name | lower }}"
+    - repo_file_name: /tmp/centos-base.repo
+    - repo_id: updates
+    - version: "7.3"
+    - with_date: true
+    - repo_block: | 
+        [updates]
+        name=CentOS-$releasever - Updates
+        mirrorlist=http://mirrorlist.centos.org/?release=$releasever&arch=$basearch&repo=updates&infra=$infra
+        gpgcheck=1
+        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+
+  tasks:
+  - name: make build dirs
+    file:
+      path: /export/{{ item }}
+      state: directory
+      mode: 0755
+    with_items:
+      - 'nightly'
+      - 'build'
+      - 'src'
+
+  - name: make local updates nightly dir
+    local_action: command mkdir -p /export/nightly/{{ repo_dir }}/
+
+  - name: get date
+    command: date +%Y%m%d
+    register: date_output
+    when: with_date
+
+  - name: get date as variable
+    set_fact: version={{ version + '_' + date_output.stdout_lines | first }}
+    when: with_date
+
+  - name: create CentOS repo file
+    blockinfile:
+      create: yes
+      path: "{{ repo_file_name }}"
+      content: "{{ repo_block }}"
+
+  - name: create updates iso
+    command: stack create mirror newest=true name={{ pallet_name }} repoconfig={{ repo_file_name }} version={{ version }} repoid={{ repo_id }}
+    args:
+      chdir: /export/nightly/
+    register: build_status
+    ignore_errors: true
+
+  - name: find updates pallets
+    shell: ls -t /export/nightly/{{ repo_id }}/{{ pallet_name}}-{{ version }}-*.iso
+    register: latest_updates_isos
+    when: build_status|succeeded
+
+  - name: find latest updates pallet filename
+    set_fact: centos_updates_iso={{ latest_updates_isos.stdout_lines | first }}
+    when: build_status|succeeded
+
+  - name: get artifact iso
+    fetch:
+      src: "{{ centos_updates_iso }}"
+      dest: /export/nightly/{{ repo_dir }}/
+      flat: yes
+      fail_on_missing: yes
+    when: build_status|succeeded
+
+  - name: delete artifact isos
+    file:
+      name: "{{ centos_updates_iso }}"
+      state: absent
+
+  - name: delete source tree
+    file:
+      name: /export/{{ item }}/
+      state: absent
+    with_items:
+      - 'nightly'
+      - 'build'
+      - 'src'
