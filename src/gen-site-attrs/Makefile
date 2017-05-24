@@ -42,7 +42,7 @@
 PKGROOT		= /opt/stack/gen-site-attrs
 ROLLROOT	= ../..
 DEPENDS.FILES	= site.attrs.j2 stacki_attrs.py stacklib/docopt.py \
-	stacklib/__init__.py stacklib/ip.py
+	stacklib/__init__.py
 
 include $(STACKBUILD)/etc/CCRules.mk
 
@@ -57,4 +57,10 @@ install::
 	$(INSTALL) -m 0777 stacki_attrs.py $(ROOT)/$(PKGROOT)/bin/
 	mkdir -p -m 777 $(ROOT)/$(PKGROOT)/stacklib/
 	$(INSTALL) -m 0777 stacklib/*py $(ROOT)/$(PKGROOT)/stacklib/
+	mkdir -p -m 777 $(ROOT)/opt/stack/share/licenses
+	(\
+		cd LICENSE; \
+		find . -type f | cpio -pudv $(ROOT)/opt/stack/share/licenses/; \
+	)
+
 
