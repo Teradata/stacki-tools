@@ -30,7 +30,7 @@ See the `bob` sub-folder's README for details.
 
 # `stacki-tools/src/fab`
 
-This creates the RPM named `stacki-fab-3.x-all.x86_64.rpm`.
+This creates the RPM named `stacki-fab-4.x-all.x86_64.rpm`.
 Install this RPM on a vanilla CentOS or Red Hat server, then execute
 `/opt/stack/bin/frontend-install.py` to transform the server into a Stacki
 frontend.
