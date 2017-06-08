@@ -68,11 +68,9 @@ class Command(stack.commands.sync.host.command):
 		for host in hosts:
 			if me != host:
 				if recurse:
-					cmd = 'scp -r %s %s:%s ' % (host,src,dest)
+					cmd = 'scp -r %s %s:%s ' % (src,host,dest)
 				else:
-					cmd = 'scp %s %s:%s ' % (host,src,dest)
-
-			cmd += 'bash > /dev/null 2>&1 '
+					cmd = 'scp %s %s:%s ' % (src,host,dest)
 
 			try:
 				p = Parallel(cmd)
