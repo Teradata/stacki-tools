@@ -173,7 +173,7 @@ stacki_iso = os.path.abspath(stacki_iso)
 repoconfig(stacki_iso, extra_isos)
 
 pkgs = [ 'stack-command', 'foundation-python', 'stack-pylib',
-	'foundation-python-xml', 'foundation-redhat', 
+	'foundation-python-xml', 'foundation-redhat', 'foundation-py-PyMySQL',
 	'foundation-py-wxPython','foundation-py-pygtk',
 	'foundation-py-ipaddress', 'stack-wizard', 'net-tools']
 
