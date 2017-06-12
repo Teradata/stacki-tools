@@ -62,6 +62,16 @@
     set_fact: centos_updates_iso={{ latest_updates_isos.stdout_lines | first }}
     when: build_status|succeeded
 
+  - name: check iso file size
+    stat:
+      path: "{{ centos_updates_iso }}"
+    register: file_stat
+
+  - name: fail if iso is too small
+    fail:
+      msg: "CentOS Updates file size is too small"
+    when: file_stat.stat.size < 1 * 1024 ** 3
+
   - name: get artifact iso
     fetch:
       src: "{{ centos_updates_iso }}"

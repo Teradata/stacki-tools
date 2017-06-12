@@ -94,6 +94,8 @@ class Builder(object):
             'force_build': False,
             'skip_refresh': False,
             'skip_bootstrap': False,
+            'skip_stamp': False,
+            'versionfile': 'version.mk',
         }
 
         config = ConfigParser.ConfigParser(defaults)
@@ -116,6 +118,8 @@ class Builder(object):
         self.force_build = config.get('build', 'force_build')
         self.skip_refresh = config.get('build', 'skip_refresh')
         self.skip_bootstrap = config.get('build', 'skip_bootstrap')
+        self.skip_stamp = config.get('build', 'skip_stamp')
+        self.versionfile = config.get('build', 'versionfile')
 
         mandatory_options = (self.pallet_name, self.git_username, self.git_password, self.repo_url)
         if None in mandatory_options:
@@ -241,6 +245,8 @@ class Builder(object):
 
     def deliver_iso(self):
         log(self.global_build_log, 'Copying iso to delivery directory')
+        # get hashes
+        # reading the whole file into memory because RAM is cheap (sorry Joe)
         glob_str = '{0}/build-{1}-{2}/{1}-*_{3}*.iso'.format(
             self.makefile_dir, self.pallet_name, self.branch, self.commit_id)
 
@@ -284,14 +290,18 @@ class Builder(object):
 
 
     def stamp_version(self):
+        if self.skip_stamp:
+            return
         self.commit_id = git_get_current_commit_id()
-        versionmk_loc = '{0}/{1}'.format(self.makefile_dir, 'version.mk')
+        versionmk_loc = '{0}/{1}'.format(self.makefile_dir, self.versionfile)
         output_lines = []
 
         if self.branch != 'master':
             commit_label = '{0}_{1}'.format(self.branch, self.commit_id)
         else:
             commit_label = self.commit_id
+
+        version_string_exists = False
         with open(versionmk_loc, 'r') as version_fh:
             for line in version_fh.readlines():
                 if line.startswith(('VERSION', 'export ROLLVERSION', 'export VERSION', 'ROLLVERSION')):
@@ -299,7 +309,12 @@ class Builder(object):
                     version = self._interpolate_make_string(version.strip())
                     self.src_version = version
                     line = '{0}= {1}_{2}\n'.format(lhs, version, commit_label)
+                    version_string_exists = True
                 output_lines.append(line)
+            if not version_string_exists:
+                results = exec_cmd('stack report version'.split())
+                version = results.stdout.strip()
+                output_lines.append('VERSION = {0}_{1}\n'.format(version, commit_label))
 
         with open(versionmk_loc, 'w') as version_fh:
             version_fh.writelines(output_lines)

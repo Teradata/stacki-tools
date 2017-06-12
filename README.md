@@ -30,7 +30,7 @@ See the `bob` sub-folder's README for details.
 
 # `stacki-tools/src/fab`
 
-This creates the RPM named `stacki-fab-3.x-all.x86_64.rpm`.
+This creates the RPM named `stacki-fab-4.x-all.x86_64.rpm`.
 Install this RPM on a vanilla CentOS or Red Hat server, then execute
 `/opt/stack/bin/frontend-install.py` to transform the server into a Stacki
 frontend.
@@ -40,7 +40,7 @@ See [Frontend Installation - Existing](https://github.com/StackIQ/stacki/wiki/Fr
 
 # `stacki-tools/src/gen-site-attrs`
 
-`/opt/stack/gen-site-attrs/bin/stacki_attrs.py' is a python script to generate a
+`/opt/stack/gen-site-attrs/bin/stacki_attrs.py` is a python script to generate a
 Stacki `site.attrs` file for use in provisioning a Stacki Frontend.
 
 stacki_attrs.py allows you to specify all of the possible variables that normally go into a `site.attrs` file, which you can then roll into an install ISO or (better) serve from an HTTP server (or whatever python's urllib can handle) from a newer version of StackiOS.

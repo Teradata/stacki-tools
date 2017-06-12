@@ -10,11 +10,12 @@
     pallet_name: "{{ lookup('ini', 'pallet_name section=build file=' + ini_file) }}"
     repo_dir: "{{ lookup('ini', 'repo_base_dir section=build file=' + ini_file + ' default=' + pallet_name) }}"
     branch: "{{ lookup('ini', 'branch section=build file=' + ini_file + ' default=master') }}"
+    extract_rpms: False
 
   tasks:
-  - name: print vars
-    debug:
-      msg: "{{ repo_dir }}"
+
+  - name: cast extract_rpms to bool
+    set_fact: extract_rpms={{ extract_rpms | bool }}
 
   - name: find latest pallet iso
     local_action: shell ls -t /export/nightly/{{ pallet_name }}/{{ pallet_name }}*.iso
@@ -35,8 +36,8 @@
   - name: extract commit hash from iso
     set_fact: pallet_commit={{ latest_iso | basename | regex_replace(iso_pattern, '\\g<commit>') }}
 
-  - name: refresh pallet source
-    local_action: command chdir=/export/build/{{ repo_dir }} git pull
+  - name: hacky way to refresh source
+    local_action: command ansible-playbook /root/ansible/refresh_pallet_src.yml -i 'localhost,' -v -e "ini_file={{ ini_file }}"
 
   - name: change branch
     local_action: command chdir=/export/build/{{ repo_dir }} git checkout {{ branch }}
@@ -116,6 +117,11 @@
     register: file_path
     when: build_status|succeeded
 
+  - name: ensure landing dir exists
+    file:
+      path: /export/nightly/{{ ini_file | basename }}/
+      state: directory
+
   - name: get iso
     fetch:
       src: "{{ file_path.stdout_lines | first }}"
@@ -123,6 +129,20 @@
       flat: yes
       fail_on_missing: yes
     when: build_status|succeeded
+
+  - name: find built RPM's
+    shell: find /export/build/{{ repo_dir }}/*/RPMS/* -name *rpm
+    register: rpm_list
+    when: build_status|succeeded and extract_rpms
+
+  - name: get RPM's
+    fetch:
+      src: "{{ item }}"
+      dest: /export/nightly/RPMS/
+      flat: yes
+      fail_on_missing: yes
+    when: build_status|succeeded and extract_rpms
+    with_items: "{{ rpm_list.stdout_lines }}"
 
   - name: delete github cred
     file:
