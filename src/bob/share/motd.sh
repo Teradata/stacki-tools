@@ -18,6 +18,9 @@ cat << "HEREDOC"
 
 HEREDOC
 
+if [ ! -d /export/nightly/stacki/ ]; then
+	return
+fi
 
 LATEST_ISO=`ls -t /export/nightly/stacki/stacki-[0-9]*.iso 2>/dev/null | head -1`
 ISO_COMMIT=`basename $LATEST_ISO 2>/dev/null | sed -rn "s/stacki-\w+.\w*_(\w+)-.*.iso/\1/p"` 
