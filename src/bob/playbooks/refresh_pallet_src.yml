@@ -53,7 +53,7 @@
     register: check_path
 
   - name: git clone if repo doesn't exist
-    command: git clone https://{{ git_user }}:{{ git_pass }}@{{ git_url }}
+    command: git clone https://{{ git_user }}:{{ git_password }}@{{ git_url }}
     args:
       chdir: /export/build/
     when: check_path.stat.exists == false
