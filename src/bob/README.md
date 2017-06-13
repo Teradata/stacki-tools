@@ -36,10 +36,12 @@ If you would like build artifacts available via HTTP, make a series of symbolic 
 
 ```
 ln -s /export/nightly /var/www/html/nightly 
-ln -s /opt/stack/share/stacki-bob/style.css /var/www/html/nightly/style.css
+ln -s /opt/stack/share/stacki-bob/style.css /var/www/html/style.css
 ln -s /opt/stack/share/stacki-bob/index.html /var/www/html/index.html
 ln -s /opt/stack/share/stacki-bob/buildserver.conf /etc/httpd/conf.d/stacki-bob.conf
 systemctl restart httpd
+stack add host firewall frontend network=all service="www" protocol="tcp" chain="INPUT" action="ACCEPT" rulename="bob-www"
+stack sync host firewall localhost restart=true
 ```
 
 Then point your webbrowser to your Stacki-BOB server and you'll be redirected to your build artifact directory.
