@@ -39,7 +39,7 @@
       - 'src'
 
   - name: check if git_password points to a file
-    command: cat {{ git_url }}
+    command: cat {{ git_password }}
     ignore_errors: true
     register: cat_result
 
