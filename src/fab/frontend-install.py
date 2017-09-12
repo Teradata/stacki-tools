@@ -35,7 +35,10 @@ def umount(dest):
 	subprocess.call(['umount', dest])
 
 def installrpms(pkgs):
-	cmd = [ 'yum', '-y', 'install' ]
+	if osname == 'redhat':
+		cmd = [ 'yum', '-y', 'install' ]
+	elif osname == 'sles':
+		cmd = [ 'zypper', 'install', '-y', '-f' ]
 	cmd += pkgs
 	return subprocess.call(cmd)
 
@@ -67,7 +70,9 @@ def find_repos(iso, stacki_only = False):
 		search_dir = os.path.join(mountdir, 'stacki')
 
 	for (path, dirs, files) in os.walk(search_dir):
-		if 'repodata' in dirs:
+		if 'suse' in dirs:
+			repodirs.append(os.path.join(path, 'suse'))
+		elif 'repodata' in dirs:
 			repodirs.append(path)
 
 	return repodirs
@@ -75,29 +80,59 @@ def find_repos(iso, stacki_only = False):
 def repoconfig(stacki_iso, extra_isos):
 	# we only want to pull stacki from 'stacki_iso'
 	# but we'll look for all pallets in 'extra_isos'
+
 	if extra_isos:
 		#
 		# we are going to use the ISO(s) described in the 'extra_isos'
 		# list, so let's move the CentOS repo files out of the way.
 		#
-		subprocess.call(['mkdir', '-p', '/etc/yum.repos.d/save'])
-		subprocess.call(['mv', '/etc/yum.repos.d/*.repo',
-			'/etc/yum.repos.d/save/'])
+		if osname == 'redhat':
+			repodir = '/etc/yum.repos.d'
+		elif osname == 'sles':
+			repodir = '/etc/zypp/repos.d'
+
+		subprocess.call(['mkdir', '-p', '%s/save' % repodir])
+
+		files = os.listdir(repodir)
+		for f in files:
+			if os.path.isfile('%s/%s' % (repodir, f)):
+				subprocess.call(['mv', '%s/%s' % (repodir, f),
+					'%s/save/' % repodir])
 
 	count = 0
 	repos = find_repos(stacki_iso, stacki_only=True)
 	for iso in extra_isos:
 		repos.extend(find_repos(iso))
 
-	with open('/etc/yum.repos.d/stack.repo', 'w') as repofile:
-		for repo in repos:
-			count += 1
-			reponame = "iso_repo_%s" % count
-			repofile.write('[%s]\n' % reponame)
-			repofile.write('name=%s\n' % reponame)
-			repofile.write('baseurl=file://%s\n' % (repo))
-			repofile.write('assumeyes=1\n')
-			repofile.write('gpgcheck=no\n\n')
+	if osname == 'redhat':
+		with open('/etc/yum.repos.d/stacki.repo', 'w') as repofile:
+			for repo in repos:
+				count += 1
+				reponame = "iso_repo_%s" % count
+				repofile.write('[%s]\n' % reponame)
+				repofile.write('name=%s\n' % reponame)
+				repofile.write('baseurl=file://%s\n' % (repo))
+				repofile.write('assumeyes=1\n')
+				repofile.write('gpgcheck=no\n\n')
+	elif osname == 'sles':
+		with open('/etc/zypp/repos.d/stacki.repo', 'w') as repofile:
+			for repo in repos:
+				count += 1
+				reponame = "iso_repo_%s" % count
+				repofile.write('[%s]\n' % reponame)
+				repofile.write('name=%s\n' % reponame)
+				repofile.write('baseurl=file://%s\n' % (repo))
+				repofile.write('assumeyes=1\n')
+				repofile.write('gpgcheck=no\n\n')
+
+	#
+	# clean/initialize the repos
+	#
+	if osname == 'redhat':
+		cmd = [ 'yum', 'clean', 'all' ]
+	elif osname == 'sles':
+		cmd = [ 'zypper', 'clean', '--all' ]
+	return subprocess.call(cmd)
 
 def ldconf():
 	file = open('/etc/ld.so.conf.d/foundation.conf', 'w')
@@ -129,6 +164,18 @@ tee = subprocess.Popen(["tee", "/tmp/frontend-install.log"],
 os.dup2(tee.stdin.fileno(), sys.stdout.fileno())
 os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
 
+#
+# determine if this is CentOS/RedHat or SLES
+#
+if os.path.exists('/etc/redhat-release'):
+	osname = 'redhat'
+elif os.path.exists('/etc/SuSE-release'):
+	osname = 'sles'
+else:
+	print('Unrecognized operating system\n')
+	usage()
+	sys.exit(-1)
+	
 #
 # process the command line arguments
 #
@@ -172,15 +219,27 @@ stacki_iso = os.path.abspath(stacki_iso)
 # create repo config file
 repoconfig(stacki_iso, extra_isos)
 
-pkgs = [ 'stack-command', 'foundation-python', 'stack-pylib',
-	'foundation-python-xml', 'foundation-redhat', 'foundation-py-PyMySQL',
-	'foundation-py-wxPython','foundation-py-pygtk',
-	'foundation-py-ipaddress', 'stack-wizard', 'net-tools']
+pkgs = [ 'foundation-python', 'foundation-python-packages',
+	'stack-command','stack-pylib', 'net-tools']
+
+if 0:
+	pkgs.append('stack-wizard')
+
+if osname == 'redhat':
+	pkgs.extend([ 'foundation-py-pygtk', 'foundation-py-wxPython',
+		'foundation-redhat' ])
 
 return_code = installrpms(pkgs)
-if return_code != 0:
-	print("Error: stacki package installation failed")
-	sys.exit(return_code)
+
+if 0:
+	if return_code != 0:
+		print("Error: stacki package installation failed")
+		sys.exit(return_code)
+
+if 0:
+	if return_code != 0:
+		print("Error: stacki package installation failed")
+		sys.exit(return_code)
 
 banner("Configuring dynamic linker for stacki")
 ldconf()
@@ -246,6 +305,8 @@ subprocess.call([stackpath, 'run', 'pallet', 'database=false'], stdin=infile,
 	stdout=outfile)
 infile.close()
 outfile.close()
+
+sys.exit(0)
 
 banner("Run Setup Script")
 # run run.sh
