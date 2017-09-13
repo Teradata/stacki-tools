@@ -185,7 +185,7 @@ opts, args = getopt.getopt(sys.argv[1:], '', [
 
 stacki_iso = None
 extra_isos = []
-noX = 0
+noX = True
 
 for opt, arg in opts:
 	if opt == '--stacki-iso':
@@ -222,8 +222,9 @@ repoconfig(stacki_iso, extra_isos)
 pkgs = [ 'foundation-python', 'foundation-python-packages',
 	'stack-command','stack-pylib', 'net-tools']
 
-if 0:
-	pkgs.append('stack-wizard')
+# No GUI for SLES yet
+if osname == 'redhat':
+	pkgs.extend([ 'foundation-newt', 'stack-wizard'])
 
 if osname == 'redhat':
 	pkgs.extend([ 'foundation-py-pygtk', 'foundation-py-wxPython',
@@ -231,28 +232,22 @@ if osname == 'redhat':
 
 return_code = installrpms(pkgs)
 
-if 0:
-	if return_code != 0:
-		print("Error: stacki package installation failed")
-		sys.exit(return_code)
+if return_code != 0:
+	print("Error: stacki package installation failed")
+	sys.exit(return_code)
 
-if 0:
-	if return_code != 0:
-		print("Error: stacki package installation failed")
-		sys.exit(return_code)
 
 banner("Configuring dynamic linker for stacki")
 ldconf()
 
-if not os.path.exists('/tmp/site.attrs') and not \
-		os.path.exists('/tmp/rolls.xml'):
+if not os.path.exists('/tmp/site.attrs') and not os.path.exists('/tmp/rolls.xml'):
 	#
 	# execute boss_config.py. completing this wizard creates
 	# /tmp/site.attrs and /tmp/rolls.xml
 	#
 	banner("Launch Boss-Config")
 	mount(stacki_iso, '/mnt/cdrom')
-	cmd = [ '/opt/stack/bin/python', '/opt/stack/bin/boss_config.py',
+	cmd = [ '/opt/stack/bin/python3', '/opt/stack/bin/boss_config.py',
 		'--no-partition', '--no-net-reconfig' ]
 	if noX:
 		cmd.append('--noX')
