@@ -3,6 +3,8 @@
 
 - hosts: all
   remote_user: root
+  vars:
+    - with_date: true
 
   tasks:
   - name: make build dirs
@@ -21,6 +23,15 @@
       state: directory
       mode: 0755
 
+  - name: get date
+    command: date +%Y%m%d
+    register: date_output
+    when: with_date
+
+  - name: get date as variable
+    set_fact: date={{ date_output.stdout_lines | first }}
+    when: with_date
+
   - name: find stacki pallets
     local_action: shell ls -t /export/nightly/stacki/stacki*.iso
     register: latest_stacki_isos
@@ -29,7 +40,7 @@
     set_fact: stacki_iso={{ latest_stacki_isos.stdout_lines | first }}
 
   - name: find latest rollos pallet
-    local_action: shell ls -t /export/nightly/os/os-7.*.iso
+    local_action: shell ls -t /export/nightly/os/os-*-7.x.x86_64*.iso
     register: latest_rollos_isos
 
   - name: find latest rollos pallet filename
@@ -53,22 +64,24 @@
   - name: extract version number from stacki iso
     set_fact: stacki_version={{ stacki_iso | basename | regex_replace(iso_pattern, '\\g<version>') }}
 
-  - name: set regex pattern for rollos ISO
-    set_fact: os_iso_pattern="os-(?P<version>\d+\.\d+)-stacki_?(?P<commit>\w+)?.*\.iso"
+#  - name: set regex pattern for rollos ISO
+#    set_fact: os_iso_pattern="os-(?P<version>\d+\.\d+)-stacki_?(?P<commit>\w+)?.*\.iso"
 
   #- name: extract commit hash from rollos iso
   #  set_fact: rollos_commit={{ rollos_iso | basename | regex_replace(os_iso_pattern, '\\g<commit>') }}
 
   - name: set stackios version stamp
-    set_fact: stackios_version={{ stacki_version + '_' + stacki_commit }}
+    set_fact: stackios_version={{ stacki_version + "_" + date + "_" + stacki_commit }}
 
   - name: create stackios iso
-    shell: stack create pallet /export/src/*iso name=stackios version={{ stackios_version }}
+    shell: stack create pallet /export/src/{{ stacki_iso }} /export/src/{{rollos_iso }} name=stackios version={{ stackios_version }}
+    args:
+      chdir: /export/nightly
     ignore_errors: true
     register: build_status
 
   - name: find remote iso
-    shell: ls /root/stackios-{{ stackios_version }}*.iso
+    shell: ls /export/nightly/stackios-{{ stackios_version }}*.iso
     register: file_path
     when: build_status|succeeded
 

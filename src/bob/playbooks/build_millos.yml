@@ -12,6 +12,7 @@
     branch: "{{ lookup('ini', 'branch section=build file=' + ini_file + ' default=master') }}"
     # TODO find a better way to infer this
     centos_version: '7.3'
+    setup_only: False
 
 
   tasks:
@@ -25,19 +26,17 @@
       - 'build'
       - 'src'
 
+# TODO add latest stacki pallet, install pylib, command, storage-config rpms
+
+  - name: hacky way to refresh source
+    local_action: command ansible-playbook /root/playbooks/refresh_pallet_src.yml -i 'localhost,' -v -e "ini_file={{ ini_file }}"
+
   - name: find stacki-pro pallets
     local_action: shell ls -t /export/nightly/stacki-pro/stacki-pro-*.iso
     register: latest_stacki_pro_isos
 
   - name: find latest stacki-pro pallet filename
     set_fact: stacki_pro_iso={{ latest_stacki_pro_isos.stdout_lines | first }}
-
-  - name: find stacki-ux pallets
-    local_action: shell ls -t /export/nightly/stacki-ux/stacki-ux-*.iso
-    register: latest_stacki_ux_isos
-
-  - name: find latest stacki-ux pallet filename
-    set_fact: stacki_ux_iso={{ latest_stacki_ux_isos.stdout_lines | first }}
 
   - name: find uefi pallets
     local_action: shell ls -t /export/nightly/uefi/uefi-*.iso
@@ -67,7 +66,6 @@
       mode: 0755
     with_items:
       - "{{ stacki_pro_iso }}"
-      - "{{ stacki_ux_iso }}"
       - "{{ uefi_iso }}"
       - "{{ centos_iso }}"
       - "{{ centos_updates_iso }}"
@@ -76,7 +74,6 @@
     command: stack remove pallet {{ item }}
     with_items:
       - stacki-pro
-      - stacki-ux
       - uefi
       - CentOS
       - CentOS-Updates
@@ -86,7 +83,6 @@
     command: stack add pallet /export/src/{{ item | basename }}
     with_items:
       - "{{ stacki_pro_iso }}"
-      - "{{ stacki_ux_iso }}"
       - "{{ uefi_iso }}"
       - "{{ centos_iso }}"
       - "{{ centos_updates_iso }}"
@@ -95,20 +91,19 @@
     command: stack enable pallet {{ item }}
     with_items:
       - stacki-pro
-      - stacki-ux
       - uefi
       - CentOS
       - CentOS-Updates
 
   - name: get version string from CentOS
-    command: stack list pallet CentOS output-header=no output-col=version
+    command: stack list pallet CentOS output-format=col:version
     register: centos_major_version_output
 
   - name: set centos and os version
     set_fact: centos_major_version={{ centos_major_version_output.stdout | trim }}
 
   - name: get version string from Updates
-    command: stack list pallet CentOS-Updates output-header=no output-col=version
+    command: stack list pallet CentOS-Updates output-format=col:version
     register: pallet_version_output
 
   - name: set updates version
@@ -128,7 +123,6 @@
 
   - name: modify updates version in version.mk
     lineinfile:
-      create: yes
       state: present
       path: /export/build/{{ repo_dir }}/7.x.mk
       regexp: 'UPDATES_VERSION	= .*'
@@ -136,7 +130,6 @@
 
   - name: modify os version in version.mk
     lineinfile:
-      create: yes
       state: present
       path: /export/build/{{ repo_dir }}/7.x.mk
       regexp: '^OSVERSION\s*= .*'
@@ -144,7 +137,6 @@
 
   - name: modify centos version in version.mk
     lineinfile:
-      create: yes
       state: present
       path: /export/build/{{ repo_dir }}/7.x.mk
       regexp: 'CENTOS_VERSION	= .*'
@@ -152,7 +144,6 @@
 
   - name: modify os version in version.mk
     lineinfile:
-      create: yes
       state: present
       path: /export/build/{{ repo_dir }}/7.x.mk
       regexp: '^VERSION		= .*'
@@ -169,9 +160,28 @@
       src: "{{ ini_file }}"
       dest: /export/src/
 
+  # for the next two tasks, we've modified the makefiles,
+  # so we don't want pallet_builder to destory those changes
+  - name: set force_build to true
+    lineinfile:
+      state: present
+      path: /export/src/{{ ini_file }}
+      regexp: '^force_build\s+=.*'
+      line: 'force_build        = True'
+
+  - name: disable git cleaning
+    lineinfile:
+      state: present
+      path: /export/src/{{ ini_file }}
+      regexp: '^skip_refresh\s+=.*'
+      line: 'skip_refresh        = True'
+
+  - name: exit if setup_only
+    meta: end_play
+    when: setup_only | bool
+
   - name: run pallet_builder
     command: /export/src/pallet_builder.py /export/src/{{ ini_file | basename }}
-#    ignore_errors: yes
     register: build_status
 
   - name: find remote detailed build log
@@ -204,7 +214,6 @@
       state: absent
     with_items:
       - "{{ stacki_pro_iso | basename }}"
-      - "{{ stacki_ux_iso | basename }}"
       - "{{ uefi_iso | basename }}"
       - "{{ centos_iso | basename }}"
       - "{{ centos_updates_iso | basename }}"
@@ -213,7 +222,6 @@
     command: stack remove pallet {{ item }}
     with_items:
       - stacki-pro
-      - stacki-ux
       - uefi
       - CentOS
       - CentOS-Updates

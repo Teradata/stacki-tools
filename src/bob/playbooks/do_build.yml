@@ -10,6 +10,7 @@
     pallet_name: "{{ lookup('ini', 'pallet_name section=build file=' + ini_file) }}"
     repo_dir: "{{ lookup('ini', 'repo_base_dir section=build file=' + ini_file + ' default=' + pallet_name) }}"
     branch: "{{ lookup('ini', 'branch section=build file=' + ini_file + ' default=master') }}"
+    delivery_dir: "{{ (branch == 'master') | ternary(pallet_name, pallet_name + '_' + branch) }}"
     extract_rpms: False
 
   tasks:
@@ -37,7 +38,7 @@
     set_fact: pallet_commit={{ latest_iso | basename | regex_replace(iso_pattern, '\\g<commit>') }}
 
   - name: hacky way to refresh source
-    local_action: command ansible-playbook /root/ansible/refresh_pallet_src.yml -i 'localhost,' -v -e "ini_file={{ ini_file }}"
+    local_action: command ansible-playbook /root/playbooks/refresh_pallet_src.yml -i 'localhost,' -v -e "ini_file={{ ini_file }}"
 
   - name: change branch
     local_action: command chdir=/export/build/{{ repo_dir }} git checkout {{ branch }}
@@ -80,6 +81,8 @@
       dest: /export/build/
       src: /export/src/{{ repo_dir }}.tar.gz
 
+# TODO if pallet build dependencies, add them here
+
   - name: copy build script
     copy:
       src: /opt/stack/bin/pallet_builder.py
@@ -88,7 +91,7 @@
 
   - name: copy github cred
     copy:
-      src: /root/github_access_token
+      src: /root/stacki_github_access_token.txt
       dest: /root/
 
   - name: copy build vars
@@ -102,18 +105,18 @@
     register: build_status
 
   - name: find remote detailed build log
-    shell: ls /export/nightly/{{ pallet_name }}/nightly*build.txt
+    shell: ls /export/nightly/{{ delivery_dir }}/nightly*build.txt
     register: file_path
 
   - name: get build log
     fetch:
       src: "{{ file_path.stdout }}"
-      dest: /export/nightly/{{ pallet_name }}/
+      dest: /export/nightly/{{ delivery_dir }}/
       flat: yes
       fail_on_missing: yes
 
   - name: find remote iso
-    shell: ls -t /export/nightly/{{ pallet_name }}/{{ pallet_name }}*iso
+    shell: ls -t /export/nightly/{{ deliver_dir }}/{{ pallet_name }}*iso
     register: file_path
     when: build_status|succeeded
 

@@ -39,7 +39,7 @@ if [ "$LATEST_ISO" != "" ]; then
 	echo "	scp `hostname`:${LATEST_ISO} ."
 	echo
 	echo "Checksums:"
-	grep --color=never `basename $LATEST_ISO` /export/nightly/checksums.txt
+	grep --color=never `basename $LATEST_ISO` /export/nightly/checksums.txt 2>/dev/null
 	echo
 	echo "Based on:"
 	echo "$COMMIT_MSG"
@@ -56,7 +56,7 @@ for pallet in `crontab -l | grep build_.*yml -o | sed -n -r 's/build_(.*)\.yml/\
 	pallets+=($pallet)
 done
 
-pallets=($(for pallet in ${pallets[@]}; do echo $pallet; done | sort))
+pallets=($(for pallet in ${pallets[@]}; do echo $pallet; done | sort | uniq))
 printf ' • %s\n' "${pallets[@]}"
 
 echo
