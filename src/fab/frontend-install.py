@@ -220,11 +220,8 @@ stacki_iso = os.path.abspath(stacki_iso)
 repoconfig(stacki_iso, extra_isos)
 
 pkgs = [ 'foundation-python', 'foundation-python-packages',
-	'stack-command','stack-pylib', 'net-tools']
-
-# No GUI for SLES yet
-if osname == 'redhat':
-	pkgs.extend([ 'foundation-newt', 'stack-wizard'])
+	'stack-command','stack-pylib', 'net-tools',
+	'foundation-newt', 'stack-wizard']
 
 if osname == 'redhat':
 	pkgs.extend([ 'foundation-py-pygtk', 'foundation-py-wxPython',
@@ -300,8 +297,6 @@ subprocess.call([stackpath, 'run', 'pallet', 'database=false'], stdin=infile,
 	stdout=outfile)
 infile.close()
 outfile.close()
-
-sys.exit(0)
 
 banner("Run Setup Script")
 # run run.sh
