@@ -219,13 +219,16 @@ stacki_iso = os.path.abspath(stacki_iso)
 # create repo config file
 repoconfig(stacki_iso, extra_isos)
 
-pkgs = [ 'foundation-python', 'foundation-python-packages',
-	'stack-command','stack-pylib', 'net-tools',
-	'foundation-newt', 'stack-wizard']
+pkgs = [ 'foundation-python', 
+	 'foundation-py-wxPython',
+	 'stack-command',
+	 'stack-pylib',
+	 'net-tools',
+	 'foundation-newt', 
+	 'stack-wizard']
 
 if osname == 'redhat':
-	pkgs.extend([ 'foundation-py-pygtk', 'foundation-py-wxPython',
-		'foundation-redhat' ])
+	pkgs.extend([ 'foundation-redhat' ])
 
 return_code = installrpms(pkgs)
 
