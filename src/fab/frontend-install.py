@@ -221,6 +221,7 @@ repoconfig(stacki_iso, extra_isos)
 
 pkgs = [ 'foundation-python', 
 	 'foundation-py-wxPython',
+	 'foundation-python-PyMySQL',
 	 'stack-command',
 	 'stack-pylib',
 	 'net-tools',
