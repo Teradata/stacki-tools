@@ -310,7 +310,18 @@ outfile = open("/tmp/run.sh", "w")
 subprocess.call([stackpath, 'run', 'pallet', 'database=false'], stdin=infile,
 	stdout=outfile)
 infile.close()
+
+ignored_pkgs = ['rpm-build', 'grub2', 'grub2-x86_64-efi', 'shim']
+outfile.seek(0)
+lines = outfile.readlines()
 outfile.close()
+
+with open("/tmp/run.sh", "w") as newout:
+	for line in lines:
+		if line.startswith('zypper install -f -y'):
+			for pkg in ignored_pkgs:
+				line = line.replace(' {0} '.format(pkg), ' ')
+		newout.write(line)
 
 banner("Run Setup Script")
 # run run.sh
