@@ -29,7 +29,14 @@ def copy(source, dest):
 
 def mount(source, dest):
 	subprocess.call(['mkdir', '-p', dest])
-	subprocess.call(['mount', '-o', 'loop', source, dest])
+	proc = subprocess.Popen(['mount', '-o', 'loop', source, dest], stderr=subprocess.PIPE)
+	stdout, stderr = proc.communicate()
+	# fix for sles12sp3 behavior on ec2
+	if stderr and proc.returncode == 32:
+		parts = stderr.rpartition(' is already mounted on ')
+		cur_mount_loc = parts[-1].strip()
+		umount(cur_mount_loc)
+		mount(source, dest)
 
 def umount(dest):
 	subprocess.call(['umount', dest])
@@ -55,10 +62,7 @@ def generate_multicast():
 def find_repos(iso, stacki_only = False):
 	''' supports jumbo pallets as well as not blowing up on stackios '''
 
-	if iso[0] == '/':
-		mountdir = os.path.join('/run', iso[1:])
-	else:
-		mountdir = os.path.join('/run', iso)
+	mountdir = os.path.join('/run', os.path.basename(iso))
 
 	mount(iso, mountdir)
 
@@ -75,6 +79,7 @@ def find_repos(iso, stacki_only = False):
 		elif 'repodata' in dirs:
 			repodirs.append(path)
 
+#	umount(mountdir)
 	return repodirs
 
 def repoconfig(stacki_iso, extra_isos):
@@ -215,6 +220,11 @@ banner("Bootstrap Stack Command Line")
 subprocess.call(['service', 'NetworkManager', 'stop'])
 
 stacki_iso = os.path.abspath(stacki_iso)
+
+mount(stacki_iso, os.path.join('/run', os.path.basename(stacki_iso)))
+for iso in extra_isos:
+	iso_path = os.path.abspath(iso)
+	mount(iso, os.path.join('/run', os.path.basename(iso)))
 
 # create repo config file
 repoconfig(stacki_iso, extra_isos)
