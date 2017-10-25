@@ -153,7 +153,6 @@ def usage():
 	print("\t--stacki-name=name : stacki name (usually 'stacki')")
 	print("Optional arguments:")
 	print("\t--extra-iso=iso1,iso2,iso3.. : list of pallets to add")
-	print("\t--noX : Don't require X11 for frontend wizard. Use text mode")
 
 ##
 ## MAIN
@@ -186,19 +185,16 @@ else:
 #
 opts, args = getopt.getopt(sys.argv[1:], '', [
 	'stacki-iso=', 'stacki-version=', 'stacki-name=',
-	'extra-iso=', 'noX' ]) 
+	'extra-iso=']) 
 
 stacki_iso = None
 extra_isos = []
-noX = True
 
 for opt, arg in opts:
 	if opt == '--stacki-iso':
 		stacki_iso = arg
 	elif opt == '--extra-iso':
 		extra_isos = arg.split(',')
-	elif opt == '--noX':
-		noX = 1
 
 if not stacki_iso:
 	print('--stacki-iso is not specified\n')
@@ -229,14 +225,15 @@ for iso in extra_isos:
 # create repo config file
 repoconfig(stacki_iso, extra_isos)
 
-pkgs = [ 'foundation-python', 
-	 'foundation-py-wxPython',
-	 'foundation-python-PyMySQL',
-	 'stack-command',
-	 'stack-pylib',
-	 'net-tools',
-	 'foundation-newt', 
-	 'stack-wizard']
+pkgs = [
+	'foundation-python', 
+	'foundation-python-PyMySQL',
+	'stack-command',
+	'stack-pylib',
+	'net-tools',
+	'foundation-newt', 
+	'stack-wizard'
+]
 
 if osname == 'redhat':
 	pkgs.extend([ 'foundation-redhat' ])
@@ -258,11 +255,14 @@ if not os.path.exists('/tmp/site.attrs') and not os.path.exists('/tmp/rolls.xml'
 	#
 	banner("Launch Boss-Config")
 	mount(stacki_iso, '/mnt/cdrom')
-	cmd = [ '/opt/stack/bin/python3', '/opt/stack/bin/boss_config.py',
-		'--no-partition', '--no-net-reconfig' ]
-	if noX:
-		cmd.append('--noX')
-	subprocess.call(cmd)
+	
+	subprocess.call([
+		'/opt/stack/bin/python3',
+		'/opt/stack/bin/boss_config_snack.py',
+		'--no-partition',
+		'--no-net-reconfig'
+	])
+	
 	umount('/mnt/cdrom')
 	
 	# add missing attrs to site.attrs
