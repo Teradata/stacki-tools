@@ -13,10 +13,51 @@ import subprocess
 import random
 import getopt
 import tempfile
+import socket
+import re
+import struct
+import json
 
-def banner(str):
+
+SITE_ATTRS_TEMPLATE = """\
+Info_CertificateCountry:US
+Info_CertificateLocality:Solana Beach
+Info_CertificateOrganization:StackIQ
+Info_CertificateState:California
+Info_ClusterLatlong:N32.87 W117.22
+Info_FQDN:{FQDN}
+Kickstart_Keyboard:us
+Kickstart_Lang:en_US
+Kickstart_Langsupport:en_US
+Kickstart_PrivateAddress:{NETWORK_ADDRESS}
+Kickstart_PrivateBroadcast:{BROADCAST_ADDRESS}
+Kickstart_PrivateDNSDomain:{DOMAIN}
+Kickstart_PrivateDNSServers:{DNS_SERVERS}
+Kickstart_PrivateEthernet:{MAC_ADDRESS}
+Kickstart_PrivateGateway:{GATEWAY}
+Kickstart_PrivateHostname:{HOSTNAME}
+Kickstart_PrivateInterface:{NETWORK_INTERFACE}
+Kickstart_PrivateKickstartHost:{NETWORK_ADDRESS}
+Kickstart_PrivateNTPHost:{NETWORK_ADDRESS}
+Kickstart_PrivateNetmask:{NETMASK}
+Kickstart_PrivateNetmaskCIDR:{NETMASK_CIDR}
+Kickstart_PrivateNetwork:{NETWORK}
+Kickstart_PrivateRootPassword:{SHADOW_PASSWORD}
+Kickstart_PublicNTPHost:pool.ntp.org
+Kickstart_Timezone:{TIMEZONE}
+nukedisks:False
+"""
+
+ROLLS_XML_TEMPLATE = """\
+<rolls>
+	<roll arch="x86_64" diskid="{3}" name="{0}" release="{2}" url="http://127.0.0.1/mnt/cdrom/" version="{1}" />
+</rolls>
+"""
+
+
+def banner(message):
 	print('#######################################')
-	print(str)
+	print(message)
 	print('#######################################')	
 
 def copy(source, dest):
@@ -149,10 +190,9 @@ def ldconf():
 def usage():
 	print("Required arguments:")
 	print("\t--stacki-iso=ISO : path to stacki ISO")
-	print("\t--stacki-version=version : stacki version")
-	print("\t--stacki-name=name : stacki name (usually 'stacki')")
 	print("Optional arguments:")
 	print("\t--extra-iso=iso1,iso2,iso3.. : list of pallets to add")
+	print("\t--use-existing : use the existing system settings and root password")
 
 ##
 ## MAIN
@@ -183,18 +223,23 @@ else:
 #
 # process the command line arguments
 #
-opts, args = getopt.getopt(sys.argv[1:], '', [
-	'stacki-iso=', 'stacki-version=', 'stacki-name=',
-	'extra-iso=']) 
+opts, args = getopt.getopt(
+	sys.argv[1:],
+	'',
+	['stacki-iso=', 'extra-iso=', 'use-existing']
+) 
 
 stacki_iso = None
 extra_isos = []
+use_existing = False
 
 for opt, arg in opts:
 	if opt == '--stacki-iso':
 		stacki_iso = arg
 	elif opt == '--extra-iso':
 		extra_isos = arg.split(',')
+	elif opt == '--use-existing':
+		use_existing = True
 
 if not stacki_iso:
 	print('--stacki-iso is not specified\n')
@@ -249,21 +294,162 @@ banner("Configuring dynamic linker for stacki")
 ldconf()
 
 if not os.path.exists('/tmp/site.attrs') and not os.path.exists('/tmp/rolls.xml'):
-	#
-	# execute boss_config.py. completing this wizard creates
-	# /tmp/site.attrs and /tmp/rolls.xml
-	#
-	banner("Launch Boss-Config")
-	mount(stacki_iso, '/mnt/cdrom')
-	
-	subprocess.call([
-		'/opt/stack/bin/python3',
-		'/opt/stack/bin/boss_config_snack.py',
-		'--no-partition',
-		'--no-net-reconfig'
-	])
-	
-	umount('/mnt/cdrom')
+	if use_existing:
+		# Construct site.attrs and rolls.xml from the exising system
+		banner("Pulling existing info")
+		attrs = {}
+		
+		# Get our FQDN and split it into its parts
+		attrs['FQDN'] = socket.getfqdn()
+		fqdn = attrs['FQDN'].split('.')
+		attrs['HOSTNAME'] = fqdn.pop(0)
+		attrs['DOMAIN'] = '.'.join(fqdn)
+		
+		# Figure out which interface to use
+		interfaces = []
+		for line in subprocess.check_output("ip -o -4 address", shell=True).splitlines():
+			interface = re.match(r'\d+:\s+(\S+)\s+', line).group(1)
+			if interface != 'lo':
+				interfaces.append((interface, line))
+		
+		if len(interfaces) == 0:
+			print("Error: No interfaces found.")
+			sys.exit(1)
+		
+		interface = interfaces[0]
+		if len(interfaces) > 1:
+			print("\nI found more than one interface, which one do you want to use?\n")
+			for ndx, interface in enumerate(interfaces):
+				print("  {}) {} {}".format(
+					ndx+1,
+					interface[0],
+					re.search(r'inet\s+([\d.]+)/', interface[1]).group(1)
+				))
+			
+			# Make input work on both python 2 and 3
+			try:
+				get_input = raw_input
+			except NameError:
+				get_input = input
+			
+			for _ in range(3):
+				try:
+					choice = int(get_input("\nType the interface number: ")) - 1
+					interface = interfaces[choice]
+					break
+				except:
+					print("\nError: Bad choice, Try again.")
+			else:
+				print("\nError: Failed after 3 tries.")
+				sys.exit(1)
+		
+		# Pull in the interface info
+		attrs['NETWORK_INTERFACE'] = interface[0]
+		match = re.match('\d+:\s+\S+\s+inet\s+([\d.]+)/(\d+)\s+brd\s+([\d.]+)', interface[1])
+		if match:
+			attrs['NETWORK_ADDRESS'] = match.group(1)
+			attrs['NETMASK_CIDR'] = int(match.group(2))
+			attrs['BROADCAST_ADDRESS'] = match.group(3)
+		else:
+			print("Error: Network info not found.")
+			sys.exit(1)
+		
+		# Calculate the NETMASK. Start with 32 bits on, shift zeros for the CIDR length,
+		# then slice it back to 32 bits
+		netmask = (0xFFFFFFFF << (32 - attrs['NETMASK_CIDR'])) & 0xFFFFFFFF
+		attrs['NETMASK'] = socket.inet_ntoa(struct.pack('!I', netmask))
+		
+		# Calculate the NETWORK address based on the netmask
+		inet_address = struct.unpack('!I', socket.inet_aton(attrs['NETWORK_ADDRESS']))[0]
+		network_address = inet_address & netmask
+		attrs['NETWORK'] = socket.inet_ntoa(struct.pack('!I', network_address))
+		
+		# Get the MAC_ADDRESS
+		for line in subprocess.check_output("ip -o link", shell=True).splitlines():
+			if line.split(':')[1].strip() == interface[0]:
+				attrs['MAC_ADDRESS'] = re.search(r'link/ether\s+([0-9a-f:]{17})\s+', line).group(1)
+				break
+		else:
+			print("Error: MAC address not found.")
+			sys.exit(1)
+		
+		# Get the GATEWAY
+		for line in subprocess.check_output("ip route", shell=True).splitlines():
+			parts = line.split()
+			if parts[0] == 'default' and parts[4] == interface[0]:
+				attrs['GATEWAY'] = parts[2]
+				break
+		else:
+			print("Error: Network gateway not found.")
+			sys.exit(1)
+		
+		# Get the DNS_SERVERS
+		dns_servers = []
+		for line in open('/etc/resolv.conf'):
+			if 'nameserver' in line:
+				dns_servers.append(line.split()[1])
+		
+		if len(dns_servers):
+			attrs['DNS_SERVERS'] = ','.join(dns_servers)
+		else:
+			print("Error: DNS server not found.")
+			sys.exit(1)
+		
+		# Get the timezone from the /etc/localtime symlink
+		path = os.path.realpath('/etc/localtime')
+		if path.startswith('/usr/share/zoneinfo/'):
+			attrs['TIMEZONE'] = path[20:]
+		else:
+			print("Error: Timezone not found.")
+			sys.exit(1)
+		
+		# Steal the root shadow password
+		for line in open('/etc/shadow'):
+			if line.startswith('root:'):
+				attrs['SHADOW_PASSWORD'] = line.split(':')[1]
+				break
+		else:
+			print("Error: Shadow password not found.")
+			sys.exit(1)
+		
+		# Write out site.attrs
+		with open('/tmp/site.attrs', 'w') as f:
+			f.write(SITE_ATTRS_TEMPLATE.format(**attrs))
+		
+		# Use the stacki version of python3 and run the wizard code
+		# to get the pallet info from the mounted ISO
+		mount(stacki_iso, '/mnt/cdrom')
+		
+		roll_info = json.loads(subprocess.check_output([
+			'/opt/stack/bin/python3',
+			'-c',
+			'from stack.wizard import Data;'
+			'import json;'
+			'print(json.dumps(Data().getDVDPallets()[0]))'
+		]))
+		
+		umount('/mnt/cdrom')
+		
+		# Write out rolls.xml
+		with open('/tmp/rolls.xml', 'w') as f:
+			f.write(ROLLS_XML_TEMPLATE.format(*roll_info))
+		
+	else:
+		#
+		# execute boss_config.py. completing this wizard creates
+		# /tmp/site.attrs and /tmp/rolls.xml
+		#
+		banner("Launch Boss-Config")
+		mount(stacki_iso, '/mnt/cdrom')
+		
+		subprocess.call([
+			'/opt/stack/bin/python3',
+			'/opt/stack/bin/boss_config_snack.py',
+			'--no-partition',
+			'--no-net-reconfig'
+		])
+		
+		umount('/mnt/cdrom')
 	
 	# add missing attrs to site.attrs
 	f = open("/tmp/site.attrs", "a")
@@ -280,17 +466,19 @@ attributes = {}
 for line in f:
         split = line.split(":",1)
         attributes[split[0]]=split[1]
-	
-# fix hostfile
-f = open("/etc/hosts", "a")
-line = '%s\t%s %s\n' % (attributes['Kickstart_PrivateAddress'],
-	attributes['Kickstart_PrivateHostname'], attributes['Info_FQDN'])
-f.write(line)
-f.close()
 
-# set the hostname to the user-entered FQDN
-print('Setting hostname to %s' % attributes['Info_FQDN'])
-subprocess.call(['hostname', attributes['Info_FQDN']])
+if not use_existing:
+	# fix hostfile
+	with open("/etc/hosts", "a") as f:
+		f.write('{}\t{} {}\n'.format(
+			attributes['Kickstart_PrivateAddress'],
+			attributes['Kickstart_PrivateHostname'],
+			attributes['Info_FQDN']
+		))
+	
+	# set the hostname to the user-entered FQDN
+	print('Setting hostname to %s' % attributes['Info_FQDN'])
+	subprocess.call(['hostname', attributes['Info_FQDN']])
 
 stackpath = '/opt/stack/bin/stack'
 subprocess.call([stackpath, 'add', 'pallet', stacki_iso])
