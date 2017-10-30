@@ -374,14 +374,44 @@ if not os.path.exists('/tmp/site.attrs') and not os.path.exists('/tmp/rolls.xml'
 			sys.exit(1)
 		
 		# Get the GATEWAY
+		gateways = []
 		for line in subprocess.check_output("ip route", shell=True).splitlines():
 			parts = line.split()
-			if parts[0] == 'default' and parts[4] == interface[0]:
-				attrs['GATEWAY'] = parts[2]
-				break
-		else:
+			if parts[0] == 'default':
+				gateways.append((parts[4], parts[2]))
+		
+		if len(gateways) == 0:
 			print("Error: Network gateway not found.")
 			sys.exit(1)
+		
+		gateway = gateways[0][1]
+		if len(gateways) > 1:
+			print("\nI found more than one default gateway, which one do you want to use?\n")
+			for ndx, gateway in enumerate(gateways):
+				print("  {}) {} {}".format(
+					ndx+1,
+					gateway[0],
+					gateway[1]
+				))
+			
+			# Make input work on both python 2 and 3
+			try:
+				get_input = raw_input
+			except NameError:
+				get_input = input
+			
+			for _ in range(3):
+				try:
+					choice = int(get_input("\nType the gateway number: ")) - 1
+					gateway = gateways[choice][1]
+					break
+				except:
+					print("\nError: Bad choice, Try again.")
+			else:
+				print("\nError: Failed after 3 tries.")
+				sys.exit(1)
+		
+		attrs['GATEWAY'] = gateway
 		
 		# Get the DNS_SERVERS
 		dns_servers = []
