@@ -484,8 +484,6 @@ if not os.path.exists('/tmp/site.attrs') and not os.path.exists('/tmp/rolls.xml'
 	# add missing attrs to site.attrs
 	f = open("/tmp/site.attrs", "a")
 	str= "Kickstart_Multicast:"+generate_multicast()+"\n"
-	str+= "Private_PureRootPassword:a\n"
-	str+= "Confirm_Private_PureRootPassword:a\n"
 	str+= "Server_Partitioning:force-default-root-disk-only\n"
 	f.write(str)
 	f.close()
@@ -518,21 +516,36 @@ f = open("/tmp/stack.xml", "w")
 cmd = [ stackpath, 'list', 'node', 'xml', 'server',
 	'attrs={0}'.format(repr(attributes))]
 print('cmd: %s' % ' '.join(cmd))
-subprocess.call(cmd, stdout=f, stderr=None)
+p = subprocess.Popen(cmd, stdout=f, stderr=None)
+rc = p.wait()
 f.close()
+
+if rc:
+	print ("Could not generate XML")
+	sys.exit(rc)
 
 banner("Process XML")
 # pipe that output to stack run pallet and output run.sh
 infile = open("/tmp/stack.xml", "r")
 outfile = open("/tmp/run.sh", "w")
-subprocess.call([stackpath, 'run', 'pallet', 'database=false'], stdin=infile,
+cmd = [stackpath, 'list', 'host', 'profile', 'chapter=main', 'profile=bash']
+p = subprocess.Popen(cmd, stdin=infile,
 	stdout=outfile)
+rc = p.wait()
 infile.close()
 outfile.close()
 
+if rc:
+	print ("Could not process XML")
+	sys.exit(rc)
+
 banner("Run Setup Script")
 # run run.sh
-subprocess.call(['sh', '/tmp/run.sh'])
+p = subprocess.Popen(['sh','/tmp/run.sh'])
+rc = p.wait()
+if rc:
+	print ("Setup Script Failed")
+	sys.exit(rc)
 
 banner("Adding Pallets")
 subprocess.call([stackpath, 'add', 'pallet', stacki_iso])
