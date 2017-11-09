@@ -33,8 +33,7 @@ def exec_cmd(command, obfuscate = None):
     # note that this obviously won't avoid it showing up in the output of `ps`
     if not obfuscate:
         obfuscate = str
-    print(obfuscate(' '.join(command)))
-    log('/export/nightly/build_log.txt', obfuscate(' '.join(command)))
+    log(GLOBAL_BUILD_LOG, obfuscate(' '.join(command)))
     proc = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -163,8 +162,9 @@ class Builder(object):
         if self.branch != 'master':
             self.delivery_dir += '_{0}'.format(self.branch)
         self.logfile = '{0}/nightly-{1}-{2}-build.txt'.format(self.delivery_dir, self.pallet_name, self.branch)
-        self.commit_id = ''
-        self.src_version = ''
+
+        self.commit_id = git_get_current_commit_id()
+        self.iso_version = ''
 
 
     def prepare_delivery_dir(self):
@@ -219,8 +219,13 @@ class Builder(object):
         if results.exit_status and '''make: *** No rule to make target `bootstrap'.''' in results.stdout:
             log(self.global_build_log, 'no target for make bootstrap, ignoring')
         else:
-            log(self.global_build_log, 'error, make bootstrap')
+            #log(self.global_build_log, 'error, make bootstrap')
             log(self.logfile, results.stdout)
+
+        if self.pallet_name == 'stacki':
+            # so nice, we have to bootstrap it twice.
+            results = exec_cmd('make bootstrap')
+
 
 
     def make_pallet(self):
@@ -234,8 +239,16 @@ class Builder(object):
             else:
                 fail(self.global_build_log, 'could not delete build directory')
 
+        self.iso_version = self.get_iso_version()
+
+        if not self.skip_stamp:
+            # stamp with branch name and commit hash
+            self.iso_version += "{0}_{1}".format(self.branch, self.commit_id)
+
+        make_pallet_cmd = 'make ROLLVERSION={0}'.format(self.iso_version)
+
         # make roll
-        results = exec_cmd('make roll')
+        results = exec_cmd(make_pallet_cmd)
 
         log(self.logfile, results.stdout)
 
@@ -249,8 +262,8 @@ class Builder(object):
 
     def deliver_iso(self):
         log(self.global_build_log, 'Copying iso to delivery directory')
-        glob_str = '{0}/build-{1}-{2}/{1}-*_{3}*.iso'.format(
-            self.makefile_dir, self.pallet_name, self.branch, self.commit_id)
+        glob_str = '{0}/build-{1}-{2}/{1}-{3}-*.iso'.format(
+            self.makefile_dir, self.pallet_name, self.branch, self.iso_version)
 
         iso_glob = glob.glob(glob_str)
         if not len(iso_glob):
@@ -288,35 +301,19 @@ class Builder(object):
         return line
 
 
-    def stamp_version(self):
-        if self.skip_stamp:
-            return
-        self.commit_id = git_get_current_commit_id()
+    def get_iso_version(self):
         versionmk_loc = '{0}/{1}'.format(self.makefile_dir, self.versionfile)
-        output_lines = []
 
-        if self.branch != 'master':
-            commit_label = '{0}_{1}'.format(self.branch, self.commit_id)
-        else:
-            commit_label = self.commit_id
-
-        version_string_exists = False
         with open(versionmk_loc, 'r') as version_fh:
             for line in version_fh.readlines():
-                if line.startswith(('VERSION', 'export ROLLVERSION', 'export VERSION', 'ROLLVERSION')):
+                if line.startswith(('export ROLLVERSION', 'ROLLVERSION')):
                     lhs, version = line.split('=')
-                    version = self._interpolate_make_string(version.strip())
-                    self.src_version = version
-                    line = '{0}= {1}_{2}\n'.format(lhs, version, commit_label)
-                    version_string_exists = True
-                output_lines.append(line)
-            if not version_string_exists:
+                    iso_version = self._interpolate_make_string(version.strip())
+            else:
                 results = exec_cmd('stack report version')
-                version = results.stdout.strip()
-                output_lines.append('VERSION = {0}_{1}\n'.format(version, commit_label))
+                iso_version = results.stdout.strip()
 
-        with open(versionmk_loc, 'w') as version_fh:
-            version_fh.writelines(output_lines)
+        return iso_version
 
 
     def do_build(self):
@@ -324,14 +321,10 @@ class Builder(object):
         self.refresh_git_repo()
         self.prepare_delivery_dir()
         self.prepare_build_dir()
-        self.stamp_version()
         self.pre_make()
         self.make_pallet()
         self.deliver_iso()
 
-
-    def do_meta_pallet_build(self):
-        pass
 
 if __name__ == '__main__':
     # grab build vars
