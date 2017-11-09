@@ -22,6 +22,13 @@ def exec_cmd(command, obfuscate = None):
     obfuscate is a callable if you wish to log something other than
     the exact command (to protect passwords, etc)
     """
+    # turn strings into lists here, so we don't have 'split()'s sprinkled across the code
+    try:
+        command = command.split()
+    except AttributeError:
+        # already a list
+        pass
+
     # if we aren't obfuscating the command, run it through str to effectively 'noop'
     # note that this obviously won't avoid it showing up in the output of `ps`
     if not obfuscate:
@@ -41,6 +48,10 @@ def log(logfile, message):
     with open(logfile, 'a') as logfh:
         logfh.write(message + '\n')
 
+def fail(logfile, message):
+    log(logfile, message)
+    sys.exit(1)
+
 def git_clone(url, username = None, password = None):
     # we want to obfuscate potential passwords from the logs, if they exist
     obfs = None
@@ -51,34 +62,34 @@ def git_clone(url, username = None, password = None):
             lambda username, password, url: url.replace(username, 'USERNAME').replace(password, 'PASSWORD'),
             username,
             password)
-    results = exec_cmd('git clone {0}'.format(url).split(), obfs)
+    results = exec_cmd('git clone {0}'.format(url), obfs)
     if results.exit_status:
         log('/export/nightly/build_log.txt', 'git clone failed')
 
 def git_pull():
-    results = exec_cmd('git pull'.split())
+    results = exec_cmd('git pull')
     if results.exit_status:
         log('/export/nightly/build_log.txt', 'git pull failed')
 
 def git_get_current_commit_id():
-    results = exec_cmd('git rev-parse --short HEAD'.split())
+    results = exec_cmd('git rev-parse --short HEAD')
     if results.exit_status:
         log('/export/nightly/build_log.txt', 'git rev-parse failed')
     else:
         return results.stdout.strip()
 
 def git_checkout(branch = 'master'):
-    results = exec_cmd('git checkout --force {0}'.format(branch).split())
+    results = exec_cmd('git checkout --force {0}'.format(branch))
     if results.exit_status:
         log(GLOBAL_BUILD_LOG, 'git checkout failed')
 
 def git_reset():
-    results = exec_cmd('git reset --hard'.split())
+    results = exec_cmd('git reset --hard')
     if results.exit_status:
         log(GLOBAL_BUILD_LOG, 'git reset failed')
 
 def git_clean():
-    results = exec_cmd('git clean -xfd'.split())
+    results = exec_cmd('git clean -xfd')
     if results.exit_status:
         log(GLOBAL_BUILD_LOG, 'git clean failed')
 
@@ -91,7 +102,7 @@ class Builder(object):
 
         defaults = {
             'branch': 'master',
-            'force_build': False,
+            'skip_clean': False,
             'skip_refresh': False,
             'skip_bootstrap': False,
             'skip_stamp': False,
@@ -103,28 +114,25 @@ class Builder(object):
         try:
             config.read(config_file)
         except OSError:
-            log(self.global_build_log, 'build.ini "%s" file might not exist' % config_file)
-            raise
+            fail(self.global_build_log, 'build.ini "%s" file might not exist' % config_file)
         except ConfigParser.Error as e:
-            log(self.global_build_log, e)
-            raise
+            fail(self.global_build_log, e)
 
-        self.git_username = config.get('build', 'git_user')
-        self.git_password = config.get('build', 'git_passwd')
+        self.git_username   = config.get('build', 'git_user')
+        self.git_password   = config.get('build', 'git_passwd')
 
-        self.pallet_name = config.get('build', 'pallet_name')
-        self.repo_url = config.get('build', 'repo_url')
-        self.branch = config.get('build', 'branch')
-        self.force_build = config.get('build', 'force_build')
-        self.skip_refresh = config.get('build', 'skip_refresh')
+        self.pallet_name    = config.get('build', 'pallet_name')
+        self.repo_url       = config.get('build', 'repo_url')
+        self.branch         = config.get('build', 'branch')
+        self.skip_clean     = config.get('build', 'skip_clean')
+        self.skip_refresh   = config.get('build', 'skip_refresh')
         self.skip_bootstrap = config.get('build', 'skip_bootstrap')
-        self.skip_stamp = config.get('build', 'skip_stamp')
-        self.versionfile = config.get('build', 'versionfile')
+        self.skip_stamp     = config.get('build', 'skip_stamp')
+        self.versionfile    = config.get('build', 'versionfile')
 
         mandatory_options = (self.pallet_name, self.git_username, self.git_password, self.repo_url)
         if None in mandatory_options:
-            log(self.global_build_log, 'not all args specified in build.ini file')
-            raise Exception
+            fail(self.global_build_log, 'not all args specified in build.ini file')
 
         try:
             # check to see if password is a filename
@@ -182,7 +190,7 @@ class Builder(object):
 
     def prepare_build_dir(self):
         os.chdir(self.src_root_dir)
-        if self.force_build:
+        if self.skip_clean:
             return
 
         git_checkout(self.branch)
@@ -194,12 +202,11 @@ class Builder(object):
         try:
             os.chdir(self.makefile_dir)
         except OSError as e:
-            if e.errno == 2:
-                raise
+            fail(self.global_build_log, e)
 
         self._set_build_env_vars()
 
-        results = exec_cmd('make nuke.all'.split())
+        results = exec_cmd('make nuke.all')
         if results.exit_status:
             log(self.global_build_log, 'error, make nuke.all')
             log(self.logfile, results.stdout)
@@ -208,9 +215,9 @@ class Builder(object):
             log(self.global_build_log, 'skipping bootstrap')
             return
 
-        results = exec_cmd('make bootstrap'.split())
+        results = exec_cmd('make bootstrap')
         if results.exit_status and '''make: *** No rule to make target `bootstrap'.''' in results.stdout:
-            log(self.global_build_log, 'no target for make bootstrap')
+            log(self.global_build_log, 'no target for make bootstrap, ignoring')
         else:
             log(self.global_build_log, 'error, make bootstrap')
             log(self.logfile, results.stdout)
@@ -225,46 +232,38 @@ class Builder(object):
             if e.errno == 2:
                 pass # directory doesn't exist
             else:
-                log(self.global_build_log, 'could not delete build directory')
-                raise
+                fail(self.global_build_log, 'could not delete build directory')
 
         # make roll
-        results = exec_cmd('make roll'.split())
+        results = exec_cmd('make roll')
 
         log(self.logfile, results.stdout)
 
         # exit if fail
         if results.exit_status:
-            log(self.global_build_log, 'error, make roll')
-            raise Exception('Error in make roll')
+            fail(self.global_build_log, 'error in make roll')
 
         if not self.make_check():
-            log(self.global_build_log, 'error, make manifest-check')
-            raise Exception('Error in make manifest-check')
+            fail(self.global_build_log, 'error, make manifest-check')
 
 
     def deliver_iso(self):
         log(self.global_build_log, 'Copying iso to delivery directory')
-        # get hashes
-        # reading the whole file into memory because RAM is cheap (sorry Joe)
         glob_str = '{0}/build-{1}-{2}/{1}-*_{3}*.iso'.format(
             self.makefile_dir, self.pallet_name, self.branch, self.commit_id)
 
         iso_glob = glob.glob(glob_str)
         if not len(iso_glob):
-            log(self.global_build_log, 'Could not find an iso with glob: {0}'.format(glob_str))
-            raise Exception('Could not find an iso with glob: {0}'.format(glob_str))
+            fail(self.global_build_log, 'Could not find an iso with glob: {0}'.format(glob_str))
         iso_fname = iso_glob[0]
 
         # copy iso to delivery
         log(self.global_build_log, 'copying {0} to {1}'.format(iso_fname, self.delivery_dir))
         shutil.copy(iso_fname, self.delivery_dir)
-        iso_fname = os.path.basename(iso_fname)
-        iso_fpath = '{0}/{1}'.format(self.delivery_dir, os.path.basename(iso_fname))
 
 
     def make_check(self):
-        results = exec_cmd('make manifest-check'.split())
+        results = exec_cmd('make manifest-check')
         if results.exit_status:
             log(self.global_build_log, 'error, make manifest-check')
             log(self.logfile, results.stdout)
@@ -280,13 +279,13 @@ class Builder(object):
                 os.environ[key] = val
 
 
-    def _interpolate_make_string(self, version):
-        if '$(shell ' in version:
-            match = re.search(r'(\$\(shell (.*)\))', version)
+    def _interpolate_make_string(self, line):
+        if '$(shell ' in line:
+            match = re.search(r'(\$\(shell (.*)\))', line)
             if match:
-                results = exec_cmd(match.groups()[1].split())
-                version = version[:match.start(0)] + results.stdout.strip() + version[match.end(0):]
-        return version
+                results = exec_cmd(match.groups()[1])
+                line = line[:match.start(0)] + results.stdout.strip() + line[match.end(0):]
+        return line
 
 
     def stamp_version(self):
@@ -312,7 +311,7 @@ class Builder(object):
                     version_string_exists = True
                 output_lines.append(line)
             if not version_string_exists:
-                results = exec_cmd('stack report version'.split())
+                results = exec_cmd('stack report version')
                 version = results.stdout.strip()
                 output_lines.append('VERSION = {0}_{1}\n'.format(version, commit_label))
 
