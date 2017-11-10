@@ -277,7 +277,8 @@ pkgs = [
 	'stack-pylib',
 	'net-tools',
 	'foundation-newt', 
-	'stack-wizard'
+	'stack-wizard',
+        'rsync',
 ]
 
 if osname == 'redhat':
