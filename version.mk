@@ -1,6 +1,4 @@
 export ROLL		= stacki-tools
-export ROLLVERSION	= 4.0
-
+export ROLLVERSION	= 5.0_`date +\%Y\%m\%d`_`git rev-parse --short HEAD`
 COLOR			= pink
-
-export RELEASE		= $(shell $(STACKBUILD.ABSOLUTE)/bin/redhat-release)
+export RELEASE		= $(shell $(STACKBUILD.ABSOLUTE)/bin/os-release)
