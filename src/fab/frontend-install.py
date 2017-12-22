@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#i!/usr/bin/python
 
 # Things the RPM will do:
 # Copy foundation.conf to /etc/ld.so.conf.d/
@@ -60,12 +60,13 @@ def banner(message):
 	print(message)
 	print('#######################################')	
 
-def copy(source, dest):
-	isodir = tempfile.tempdir()
+def copy_iso(source, dest):
+	print('copying %s to %s' % (source, dest))
+	isodir = tempfile.mkdtemp()
 	banner("Copying %s to local disk" % source)
 	subprocess.call(['mkdir', '-p', dest])
 	subprocess.call(['mount', '-o', 'loop', source, isodir])
-	subprocess.call(['cp', '-r', isodir, dest])
+	subprocess.call('cp -r {0}/* {1}'.format(isodir, dest), shell=True)
 	subprocess.call(['umount', isodir])
 
 def mount(source, dest):
@@ -83,12 +84,33 @@ def umount(dest):
 	subprocess.call(['umount', dest])
 
 def installrpms(pkgs):
-	if osname == 'redhat':
+	if node_info['os'] == 'redhat':
 		cmd = [ 'yum', '-y', 'install' ]
-	elif osname == 'sles':
+	elif node_info['os'] == 'sles':
 		cmd = [ 'zypper', 'install', '-y', '-f' ]
 	cmd += pkgs
 	return subprocess.call(cmd)
+
+def get_sys_info():
+	node_info = {}
+
+	# determine what if any hypervisor this is
+	try:
+		with open('/sys/hypervisor/uuid') as hvisor:
+			if hvisor.read().startswith('ec2'):
+				node_info['hypervisor'] = 'ec2'
+			else:
+				node_info['hypervisor'] = 'unknown'
+	except IOError:
+		node_info['hypervisor'] = None
+
+	# determine if this is CentOS/RedHat or SLES
+	if os.path.exists('/etc/redhat-release'):
+		node_info['os'] = 'redhat'
+	elif os.path.exists('/etc/SuSE-release'):
+		node_info['os'] = 'sles'
+
+	return node_info
 
 def generate_multicast():
 	a = random.randrange(225,240)
@@ -100,19 +122,15 @@ def generate_multicast():
 	d = random.randrange(1,255)
 	return str(a)+'.'+str(b)+'.'+str(c)+'.'+str(d)
 
-def find_repos(iso, stacki_only = False):
+def find_repos(parent_dir, stacki_only = False):
 	''' supports jumbo pallets as well as not blowing up on stackios '''
-
-	mountdir = os.path.join('/run', os.path.basename(iso))
-
-	mount(iso, mountdir)
 
 	repodirs = []
 
-	search_dir = mountdir
+	search_dir = parent_dir
 	if stacki_only:
 		# if stacki_only, go straight to that directory
-		search_dir = os.path.join(mountdir, 'stacki')
+		search_dir = os.path.join(parent_dir, 'stacki')
 
 	for (path, dirs, files) in os.walk(search_dir):
 		if 'suse' in dirs:
@@ -120,21 +138,20 @@ def find_repos(iso, stacki_only = False):
 		elif 'repodata' in dirs:
 			repodirs.append(path)
 
-#	umount(mountdir)
 	return repodirs
 
-def repoconfig(stacki_iso, extra_isos):
+def repoconfig(stacki_iso_dir, extra_iso_dirs):
 	# we only want to pull stacki from 'stacki_iso'
 	# but we'll look for all pallets in 'extra_isos'
 
-	if extra_isos:
+	if extra_iso_dirs:
 		#
 		# we are going to use the ISO(s) described in the 'extra_isos'
 		# list, so let's move the CentOS repo files out of the way.
 		#
-		if osname == 'redhat':
+		if node_info['os'] == 'redhat':
 			repodir = '/etc/yum.repos.d'
-		elif osname == 'sles':
+		elif node_info['os'] == 'sles':
 			repodir = '/etc/zypp/repos.d'
 
 		subprocess.call(['mkdir', '-p', '%s/save' % repodir])
@@ -146,11 +163,11 @@ def repoconfig(stacki_iso, extra_isos):
 					'%s/save/' % repodir])
 
 	count = 0
-	repos = find_repos(stacki_iso, stacki_only=True)
-	for iso in extra_isos:
+	repos = find_repos(stacki_iso_dir, stacki_only=True)
+	for iso in extra_iso_dirs:
 		repos.extend(find_repos(iso))
 
-	if osname == 'redhat':
+	if node_info['os'] == 'redhat':
 		with open('/etc/yum.repos.d/stacki.repo', 'w') as repofile:
 			for repo in repos:
 				count += 1
@@ -160,7 +177,7 @@ def repoconfig(stacki_iso, extra_isos):
 				repofile.write('baseurl=file://%s\n' % (repo))
 				repofile.write('assumeyes=1\n')
 				repofile.write('gpgcheck=no\n\n')
-	elif osname == 'sles':
+	elif node_info['os'] == 'sles':
 		with open('/etc/zypp/repos.d/stacki.repo', 'w') as repofile:
 			for repo in repos:
 				count += 1
@@ -174,9 +191,9 @@ def repoconfig(stacki_iso, extra_isos):
 	#
 	# clean/initialize the repos
 	#
-	if osname == 'redhat':
+	if node_info['os'] == 'redhat':
 		cmd = [ 'yum', 'clean', 'all' ]
-	elif osname == 'sles':
+	elif node_info['os'] == 'sles':
 		cmd = [ 'zypper', 'clean', '--all' ]
 	return subprocess.call(cmd)
 
@@ -186,6 +203,177 @@ def ldconf():
 	file.close()
 
 	subprocess.call(['ldconfig'])
+
+def construct_from_existing():
+	# Construct site.attrs and rolls.xml from the exising system
+	banner("Pulling existing info")
+	attrs = {}
+
+	# Get our FQDN and split it into its parts
+	attrs['FQDN'] = socket.getfqdn()
+	fqdn = attrs['FQDN'].split('.')
+	attrs['HOSTNAME'] = fqdn.pop(0)
+	attrs['DOMAIN'] = '.'.join(fqdn)
+
+	# Figure out which interface to use
+	interfaces = []
+	for line in subprocess.check_output("ip -o -4 address", shell=True).splitlines():
+		interface = re.match(r'\d+:\s+(\S+)\s+', line).group(1)
+		if interface != 'lo':
+			interfaces.append((interface, line))
+
+	if len(interfaces) == 0:
+		print("Error: No interfaces found.")
+		sys.exit(1)
+
+	interface = interfaces[0]
+	eth_ifaces = [ifc[0] for ifc in interfaces if ifc[0].startswith('e')]
+	if len(eth_ifaces) > 1:
+		print("\nI found more than one interface, which one do you want to use?\n")
+		for ndx, interface in enumerate(interfaces):
+			print("  {}) {} {}".format(
+				ndx+1,
+				interface[0],
+				re.search(r'inet\s+([\d.]+)/', interface[1]).group(1)
+			))
+
+		# Make input work on both python 2 and 3
+		try:
+			get_input = raw_input
+		except NameError:
+			get_input = input
+
+		for _ in range(3):
+			try:
+				choice = int(get_input("\nType the interface number: ")) - 1
+				interface = interfaces[choice]
+				break
+			except:
+				print("\nError: Bad choice, Try again.")
+		else:
+			print("\nError: Failed after 3 tries.")
+			sys.exit(1)
+
+	# Pull in the interface info
+	attrs['NETWORK_INTERFACE'] = interface[0]
+	match = re.match('\d+:\s+\S+\s+inet\s+([\d.]+)/(\d+)\s+brd\s+([\d.]+)', interface[1])
+	if match:
+		attrs['NETWORK_ADDRESS'] = match.group(1)
+		attrs['NETMASK_CIDR'] = int(match.group(2))
+		attrs['BROADCAST_ADDRESS'] = match.group(3)
+	else:
+		print("Error: Network info not found.")
+		sys.exit(1)
+
+	# Calculate the NETMASK. Start with 32 bits on, shift zeros for the CIDR length,
+	# then slice it back to 32 bits
+	netmask = (0xFFFFFFFF << (32 - attrs['NETMASK_CIDR'])) & 0xFFFFFFFF
+	attrs['NETMASK'] = socket.inet_ntoa(struct.pack('!I', netmask))
+
+	# Calculate the NETWORK address based on the netmask
+	inet_address = struct.unpack('!I', socket.inet_aton(attrs['NETWORK_ADDRESS']))[0]
+	network_address = inet_address & netmask
+	attrs['NETWORK'] = socket.inet_ntoa(struct.pack('!I', network_address))
+
+	# Get the MAC_ADDRESS
+	for line in subprocess.check_output("ip -o link", shell=True).splitlines():
+		if line.split(':')[1].strip() == interface[0]:
+			attrs['MAC_ADDRESS'] = re.search(r'link/ether\s+([0-9a-f:]{17})\s+', line).group(1)
+			break
+	else:
+		print("Error: MAC address not found.")
+		sys.exit(1)
+
+	# Get the GATEWAY
+	gateways = []
+	for line in subprocess.check_output("ip route", shell=True).splitlines():
+		parts = line.split()
+		if parts[0] == 'default':
+			gateways.append((parts[4], parts[2]))
+
+	if len(gateways) == 0:
+		print("Error: Network gateway not found.")
+		sys.exit(1)
+
+	gateway = gateways[0][1]
+	if len(gateways) > 1:
+		print("\nI found more than one default gateway, which one do you want to use?\n")
+		for ndx, gateway in enumerate(gateways):
+			print("  {}) {} {}".format(
+				ndx+1,
+				gateway[0],
+				gateway[1]
+			))
+
+		# Make input work on both python 2 and 3
+		try:
+			get_input = raw_input
+		except NameError:
+			get_input = input
+
+		for _ in range(3):
+			try:
+				choice = int(get_input("\nType the gateway number: ")) - 1
+				gateway = gateways[choice][1]
+				break
+			except:
+				print("\nError: Bad choice, Try again.")
+		else:
+			print("\nError: Failed after 3 tries.")
+			sys.exit(1)
+
+	attrs['GATEWAY'] = gateway
+
+	# Get the DNS_SERVERS
+	dns_servers = []
+	for line in open('/etc/resolv.conf'):
+		if 'nameserver' in line:
+			dns_servers.append(line.split()[1])
+
+	if len(dns_servers):
+		attrs['DNS_SERVERS'] = ','.join(dns_servers)
+	else:
+		print("Error: DNS server not found.")
+		sys.exit(1)
+
+	# Get the timezone from the /etc/localtime symlink
+	path = os.path.realpath('/etc/localtime')
+	if path.startswith('/usr/share/zoneinfo/'):
+		attrs['TIMEZONE'] = path[20:]
+	else:
+		print("Error: Timezone not found.")
+		sys.exit(1)
+
+	# Steal the root shadow password
+	for line in open('/etc/shadow'):
+		if line.startswith('root:'):
+			attrs['SHADOW_PASSWORD'] = line.split(':')[1]
+			break
+	else:
+		print("Error: Shadow password not found.")
+		sys.exit(1)
+
+	# Write out site.attrs
+	with open('/tmp/site.attrs', 'w') as f:
+		f.write(SITE_ATTRS_TEMPLATE.format(**attrs))
+
+	# Use the stacki version of python3 and run the wizard code
+	# to get the pallet info from the mounted ISO
+	mount(stacki_iso, '/mnt/cdrom')
+
+	roll_info = json.loads(subprocess.check_output([
+		'/opt/stack/bin/python3',
+		'-c',
+		'from stack.wizard import Data;'
+		'import json;'
+		'print(json.dumps(Data().getDVDPallets()[0]))'
+	]))
+
+	umount('/mnt/cdrom')
+
+	# Write out rolls.xml
+	with open('/tmp/rolls.xml', 'w') as f:
+		f.write(ROLLS_XML_TEMPLATE.format(*roll_info))
 
 def usage():
 	print("Required arguments:")
@@ -208,18 +396,12 @@ tee = subprocess.Popen(["tee", "/tmp/frontend-install.log"],
 os.dup2(tee.stdin.fileno(), sys.stdout.fileno())
 os.dup2(tee.stdin.fileno(), sys.stderr.fileno())
 
-#
-# determine if this is CentOS/RedHat or SLES
-#
-if os.path.exists('/etc/redhat-release'):
-	osname = 'redhat'
-elif os.path.exists('/etc/SuSE-release'):
-	osname = 'sles'
-else:
+node_info = get_sys_info()
+if 'os' not in node_info:
 	print('Unrecognized operating system\n')
 	usage()
 	sys.exit(-1)
-	
+
 #
 # process the command line arguments
 #
@@ -250,25 +432,31 @@ if not os.path.exists(stacki_iso):
 	print("Error: File '{0}' does not exist.".format(stacki_iso))
 	sys.exit(1)
 
+isos_full_path = []
 for iso in extra_isos:
 	if not os.path.exists(iso):
 		print("Error: File '{0}' does not exist.".format(iso))
 		sys.exit(1)
+	else:
+		isos_full_path.append(os.path.abspath(iso))
+
+extra_isos = isos_full_path
 
 banner("Bootstrap Stack Command Line")
 
 # turn off NetworkManager so it doesn't overwrite our networking info
 subprocess.call(['service', 'NetworkManager', 'stop'])
 
-stacki_iso = os.path.abspath(stacki_iso)
+copy_iso(stacki_iso, os.path.join('/export', os.path.basename(stacki_iso)))
+stacki_iso_dir = os.path.join('/export', os.path.basename(stacki_iso))
+extra_iso_dirs = []
 
-mount(stacki_iso, os.path.join('/run', os.path.basename(stacki_iso)))
 for iso in extra_isos:
-	iso_path = os.path.abspath(iso)
-	mount(iso, os.path.join('/run', os.path.basename(iso)))
+	copy_iso(iso, os.path.join('/export', os.path.basename(iso)))
+	extra_iso_dirs.append(os.path.join('/export', os.path.basename(iso)))
 
 # create repo config file
-repoconfig(stacki_iso, extra_isos)
+repoconfig(stacki_iso_dir, extra_iso_dirs)
 
 pkgs = [
 	'foundation-python', 
@@ -278,10 +466,11 @@ pkgs = [
 	'net-tools',
 	'foundation-newt', 
 	'stack-wizard',
-        'rsync',
+	'rsync',
+	'make',
 ]
 
-if osname == 'redhat':
+if node_info['os'] == 'redhat':
 	pkgs.extend([ 'foundation-redhat' ])
 
 return_code = installrpms(pkgs)
@@ -294,194 +483,29 @@ if return_code != 0:
 banner("Configuring dynamic linker for stacki")
 ldconf()
 
-if not os.path.exists('/tmp/site.attrs') and not os.path.exists('/tmp/rolls.xml'):
-	if use_existing:
-		# Construct site.attrs and rolls.xml from the exising system
-		banner("Pulling existing info")
-		attrs = {}
-		
-		# Get our FQDN and split it into its parts
-		attrs['FQDN'] = socket.getfqdn()
-		fqdn = attrs['FQDN'].split('.')
-		attrs['HOSTNAME'] = fqdn.pop(0)
-		attrs['DOMAIN'] = '.'.join(fqdn)
-		
-		# Figure out which interface to use
-		interfaces = []
-		for line in subprocess.check_output("ip -o -4 address", shell=True).splitlines():
-			interface = re.match(r'\d+:\s+(\S+)\s+', line).group(1)
-			if interface != 'lo':
-				interfaces.append((interface, line))
-		
-		if len(interfaces) == 0:
-			print("Error: No interfaces found.")
-			sys.exit(1)
-		
-		interface = interfaces[0]
-		if len(interfaces) > 1:
-			print("\nI found more than one interface, which one do you want to use?\n")
-			for ndx, interface in enumerate(interfaces):
-				print("  {}) {} {}".format(
-					ndx+1,
-					interface[0],
-					re.search(r'inet\s+([\d.]+)/', interface[1]).group(1)
-				))
-			
-			# Make input work on both python 2 and 3
-			try:
-				get_input = raw_input
-			except NameError:
-				get_input = input
-			
-			for _ in range(3):
-				try:
-					choice = int(get_input("\nType the interface number: ")) - 1
-					interface = interfaces[choice]
-					break
-				except:
-					print("\nError: Bad choice, Try again.")
-			else:
-				print("\nError: Failed after 3 tries.")
-				sys.exit(1)
-		
-		# Pull in the interface info
-		attrs['NETWORK_INTERFACE'] = interface[0]
-		match = re.match('\d+:\s+\S+\s+inet\s+([\d.]+)/(\d+)\s+brd\s+([\d.]+)', interface[1])
-		if match:
-			attrs['NETWORK_ADDRESS'] = match.group(1)
-			attrs['NETMASK_CIDR'] = int(match.group(2))
-			attrs['BROADCAST_ADDRESS'] = match.group(3)
-		else:
-			print("Error: Network info not found.")
-			sys.exit(1)
-		
-		# Calculate the NETMASK. Start with 32 bits on, shift zeros for the CIDR length,
-		# then slice it back to 32 bits
-		netmask = (0xFFFFFFFF << (32 - attrs['NETMASK_CIDR'])) & 0xFFFFFFFF
-		attrs['NETMASK'] = socket.inet_ntoa(struct.pack('!I', netmask))
-		
-		# Calculate the NETWORK address based on the netmask
-		inet_address = struct.unpack('!I', socket.inet_aton(attrs['NETWORK_ADDRESS']))[0]
-		network_address = inet_address & netmask
-		attrs['NETWORK'] = socket.inet_ntoa(struct.pack('!I', network_address))
-		
-		# Get the MAC_ADDRESS
-		for line in subprocess.check_output("ip -o link", shell=True).splitlines():
-			if line.split(':')[1].strip() == interface[0]:
-				attrs['MAC_ADDRESS'] = re.search(r'link/ether\s+([0-9a-f:]{17})\s+', line).group(1)
-				break
-		else:
-			print("Error: MAC address not found.")
-			sys.exit(1)
-		
-		# Get the GATEWAY
-		gateways = []
-		for line in subprocess.check_output("ip route", shell=True).splitlines():
-			parts = line.split()
-			if parts[0] == 'default':
-				gateways.append((parts[4], parts[2]))
-		
-		if len(gateways) == 0:
-			print("Error: Network gateway not found.")
-			sys.exit(1)
-		
-		gateway = gateways[0][1]
-		if len(gateways) > 1:
-			print("\nI found more than one default gateway, which one do you want to use?\n")
-			for ndx, gateway in enumerate(gateways):
-				print("  {}) {} {}".format(
-					ndx+1,
-					gateway[0],
-					gateway[1]
-				))
-			
-			# Make input work on both python 2 and 3
-			try:
-				get_input = raw_input
-			except NameError:
-				get_input = input
-			
-			for _ in range(3):
-				try:
-					choice = int(get_input("\nType the gateway number: ")) - 1
-					gateway = gateways[choice][1]
-					break
-				except:
-					print("\nError: Bad choice, Try again.")
-			else:
-				print("\nError: Failed after 3 tries.")
-				sys.exit(1)
-		
-		attrs['GATEWAY'] = gateway
-		
-		# Get the DNS_SERVERS
-		dns_servers = []
-		for line in open('/etc/resolv.conf'):
-			if 'nameserver' in line:
-				dns_servers.append(line.split()[1])
-		
-		if len(dns_servers):
-			attrs['DNS_SERVERS'] = ','.join(dns_servers)
-		else:
-			print("Error: DNS server not found.")
-			sys.exit(1)
-		
-		# Get the timezone from the /etc/localtime symlink
-		path = os.path.realpath('/etc/localtime')
-		if path.startswith('/usr/share/zoneinfo/'):
-			attrs['TIMEZONE'] = path[20:]
-		else:
-			print("Error: Timezone not found.")
-			sys.exit(1)
-		
-		# Steal the root shadow password
-		for line in open('/etc/shadow'):
-			if line.startswith('root:'):
-				attrs['SHADOW_PASSWORD'] = line.split(':')[1]
-				break
-		else:
-			print("Error: Shadow password not found.")
-			sys.exit(1)
-		
-		# Write out site.attrs
-		with open('/tmp/site.attrs', 'w') as f:
-			f.write(SITE_ATTRS_TEMPLATE.format(**attrs))
-		
-		# Use the stacki version of python3 and run the wizard code
-		# to get the pallet info from the mounted ISO
-		mount(stacki_iso, '/mnt/cdrom')
-		
-		roll_info = json.loads(subprocess.check_output([
-			'/opt/stack/bin/python3',
-			'-c',
-			'from stack.wizard import Data;'
-			'import json;'
-			'print(json.dumps(Data().getDVDPallets()[0]))'
-		]))
-		
-		umount('/mnt/cdrom')
-		
-		# Write out rolls.xml
-		with open('/tmp/rolls.xml', 'w') as f:
-			f.write(ROLLS_XML_TEMPLATE.format(*roll_info))
-		
-	else:
-		#
-		# execute boss_config.py. completing this wizard creates
-		# /tmp/site.attrs and /tmp/rolls.xml
-		#
-		banner("Launch Boss-Config")
-		mount(stacki_iso, '/mnt/cdrom')
-		
-		subprocess.call([
-			'/opt/stack/bin/python3',
-			'/opt/stack/bin/boss_config_snack.py',
-			'--no-partition',
-			'--no-net-reconfig'
-		])
-		
-		umount('/mnt/cdrom')
-	
+if use_existing:
+	# user passed the flag, try to build their unattended install files
+	construct_from_existing()
+elif os.path.exists('/tmp/site.attrs') and os.path.exists('/tmp/rolls.xml'):
+	# user already has unattended install files
+	pass
+else:
+	#
+	# execute boss_config.py. completing this wizard creates
+	# /tmp/site.attrs and /tmp/rolls.xml
+	#
+	banner("Launch Boss-Config")
+	mount(stacki_iso, '/mnt/cdrom')
+
+	subprocess.call([
+		'/opt/stack/bin/python3',
+		'/opt/stack/bin/boss_config_snack.py',
+		'--no-partition',
+		'--no-net-reconfig'
+	])
+
+	umount('/mnt/cdrom')
+
 	# add missing attrs to site.attrs
 	f = open("/tmp/site.attrs", "a")
 	str= "Kickstart_Multicast:"+generate_multicast()+"\n"
@@ -493,8 +517,10 @@ if not os.path.exists('/tmp/site.attrs') and not os.path.exists('/tmp/rolls.xml'
 f = [line.strip() for line in open("/tmp/site.attrs","r")]
 attributes = {}
 for line in f:
-        split = line.split(":",1)
-        attributes[split[0]]=split[1]
+	if not line:
+		continue
+	split = line.split(":",1)
+	attributes[split[0]]=split[1]
 
 if not use_existing:
 	# fix hostfile
@@ -504,31 +530,38 @@ if not use_existing:
 			attributes['Kickstart_PrivateHostname'],
 			attributes['Info_FQDN']
 		))
-	
+
 	# set the hostname to the user-entered FQDN
 	print('Setting hostname to %s' % attributes['Info_FQDN'])
 	subprocess.call(['hostname', attributes['Info_FQDN']])
 
+umount(os.path.join('/run', os.path.basename(stacki_iso)))
+for iso in extra_isos:
+	umount(os.path.join('/run', os.path.basename(iso)))
+
 stackpath = '/opt/stack/bin/stack'
 subprocess.call([stackpath, 'add', 'pallet', stacki_iso])
+
 banner("Generate XML")
 # run stack list node xml server attrs="<python dict>"
 f = open("/tmp/stack.xml", "w")
 cmd = [ stackpath, 'list', 'node', 'xml', 'server',
 	'attrs={0}'.format(repr(attributes))]
 print('cmd: %s' % ' '.join(cmd))
-p = subprocess.Popen(cmd, stdout=f, stderr=None)
-rc = p.wait()
+p = subprocess.Popen(cmd, stdout=f, stderr=subprocess.PIPE)
+_, stderr = p.communicate()
+rc = p.returncode
 f.close()
 
 if rc:
-	print ("Could not generate XML")
+	print("Could not generate XML")
+	print(stderr)
 	sys.exit(rc)
 
 banner("Process XML")
 # pipe that output to stack run pallet and output run.sh
 infile = open("/tmp/stack.xml", "r")
-outfile = open("/tmp/run.sh", "w")
+outfile = open("/tmp/run.sh", "a+")
 cmd = [stackpath, 'list', 'host', 'profile', 'chapter=main', 'profile=bash']
 p = subprocess.Popen(cmd, stdin=infile,
 	stdout=outfile)
@@ -544,12 +577,17 @@ outfile.seek(0)
 lines = outfile.readlines()
 outfile.close()
 
-with open("/tmp/run.sh", "w") as newout:
-	for line in lines:
-		if line.startswith('zypper install -f -y'):
-			for pkg in ignored_pkgs:
-				line = line.replace(' {0} '.format(pkg), ' ')
-		newout.write(line)
+if node_info['hypervisor'] == 'ec2':
+	with open("/tmp/run.sh", "w") as newout:
+		for line in lines:
+			if line.startswith('zypper install -f -y'):
+				for pkg in ignored_pkgs:
+					line = line.replace(' {0} '.format(pkg), ' ')
+			newout.write(line)
+
+mount(stacki_iso, os.path.join('/run', os.path.basename(stacki_iso)))
+for iso in extra_isos:
+	mount(iso, os.path.join('/run', os.path.basename(iso)))
 
 banner("Run Setup Script")
 # run run.sh
@@ -558,6 +596,10 @@ rc = p.wait()
 if rc:
 	print ("Setup Script Failed")
 	sys.exit(rc)
+
+umount(os.path.join('/run', os.path.basename(stacki_iso)))
+for iso in extra_isos:
+	umount(os.path.join('/run', os.path.basename(iso)))
 
 banner("Adding Pallets")
 subprocess.call([stackpath, 'add', 'pallet', stacki_iso])
