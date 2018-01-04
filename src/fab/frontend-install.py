@@ -1,10 +1,4 @@
-#i!/usr/bin/python
-
-# Things the RPM will do:
-# Copy foundation.conf to /etc/ld.so.conf.d/
-# Copy boss-config files to /opt/stack/bin.  Boss_config.py 
-# has to be changed to accomodate lack of database
-# Copy wxpython RPM somewhere (it isnt included in 6.6)
+#!/usr/bin/python
 
 from __future__ import print_function
 import os
