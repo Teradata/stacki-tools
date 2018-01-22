@@ -63,21 +63,14 @@ def banner(message):
 def copy(source, dest):
 	isodir = tempfile.tempdir()
 	banner("Copying %s to local disk" % source)
+	mount(source, isodir)
 	subprocess.call(['mkdir', '-p', dest])
-	subprocess.call(['mount', '-o', 'loop', source, isodir])
 	subprocess.call(['cp', '-r', isodir, dest])
-	subprocess.call(['umount', isodir])
+	umount(isodir)
 
 def mount(source, dest):
 	subprocess.call(['mkdir', '-p', dest])
-	proc = subprocess.Popen(['mount', '-o', 'loop', source, dest], stderr=subprocess.PIPE)
-	stdout, stderr = proc.communicate()
-	# fix for sles12sp3 behavior on ec2
-	if stderr and proc.returncode == 32:
-		parts = stderr.rpartition(' is already mounted on ')
-		cur_mount_loc = parts[-1].strip()
-		umount(cur_mount_loc)
-		mount(source, dest)
+	subprocess.call(['mount', '-o', 'loop,ro', source, dest])
 
 def umount(dest):
 	subprocess.call(['umount', dest])
